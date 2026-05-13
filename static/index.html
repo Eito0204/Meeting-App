@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>이음 | 취향 기반 모임 매칭</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div id="app" class="phone">
+      <header class="app-header">
+        <button class="icon-button" id="backButton" aria-label="뒤로 가기"></button>
+        <div>
+          <p id="screenSubTitle">Team 알잘딱깔센</p>
+          <h1 id="screenTitle">이음</h1>
+        </div>
+        <button class="profile-dot" data-view="profile" aria-label="내 정보"></button>
+        <button id="notifyButton" style="position:relative;width:36px;height:36px;border-radius:50%;background:var(--line);border:none;display:grid;place-items:center;" aria-label="알림">
+          <span id="notifyIcon" style="font-size:16px;">&#128276;</span>
+          <span id="notifyBadge" style="display:none;position:absolute;top:2px;right:2px;width:10px;height:10px;border-radius:50%;background:#f43f5e;"></span>
+        </button>
+      </header>
+
+      <main class="screen-stack">
+        <section id="home" class="view active" data-title="이음" data-subtitle="Team 알잘딱깔센">
+          <div class="home-card">
+            <p>오늘의 추천</p>
+            <h2>관심사가 맞는 모임을 찾아보세요</h2>
+            <button data-view="meetings" class="primary-button">모임 둘러보기</button>
+          </div>
+          <div class="shortcut-grid">
+            <button data-view="create"><span>＋</span>모임 만들기</button>
+            <button data-view="calendar"><span>□</span>일정</button>
+            <button data-view="chat"><span>●</span>채팅</button>
+            <button data-view="profile"><span>○</span>MY</button>
+          </div>
+          <section class="section-block">
+            <div class="section-title">
+              <h2>추천 모임</h2>
+            </div>
+            <div id="meetingList" class="list-stack"></div>
+            <span id="meetingCount" class="hidden-count">0</span>
+          </section>
+        </section>
+
+        <section id="meetings" class="view" data-title="모임 탐색" data-subtitle="관심사 기반 추천">
+          <div class="search-box">
+            <input id="meetingSearch" placeholder="모임명, 카테고리 검색" />
+          </div>
+          <div class="search-box">
+            <input id="locationSearch" placeholder="📍 지역 검색 (예: 강남, 홍대)" />
+          </div>
+          <div class="chip-row">
+            <button>전체</button>
+            <button>AI</button>
+            <button>스터디</button>
+            <button>운동</button>
+            <button>전시</button>
+          </div>
+          <div id="meetingPageList" class="list-stack"></div>
+        </section>
+
+        <section id="detail" class="view" data-title="모임 상세" data-subtitle="참여 신청">
+          <div id="meetingDetail" class="detail-panel"></div>
+          <div id="meetingPostSection" style="display:none;">
+            <div class="section-title" style="margin-top:16px;">
+              <h2>모임 게시판</h2>
+              <button id="refreshMeetingPosts">새로고침</button>
+            </div>
+            <form id="meetingPostForm" class="post-compose" style="margin-bottom:12px;">
+              <input name="title" placeholder="제목" required />
+              <textarea name="content" placeholder="내용을 입력하세요." required></textarea>
+              <button class="primary-button" type="submit">등록</button>
+              <p id="meetingPostStatus" class="status-text"></p>
+            </form>
+            <div id="meetingPostList" class="list-stack"></div>
+          </div>
+        </section>
+
+        <section id="create" class="view" data-title="모임 만들기" data-subtitle="모집 정보 입력">
+          <form id="meetingForm" class="form-screen">
+            <label>모임명<input name="title" placeholder="예: 수요일 저녁 AI 스터디" required /></label>
+            <label>소개<textarea name="description" placeholder="모임 소개를 작성하세요." required></textarea></label>
+            <div class="form-row">
+              <label>카테고리
+                <select name="category" required>
+                  <option value="" disabled selected>카테고리 선택</option>
+                  <option value="스터디">📚 스터디</option>
+                  <option value="운동">🏃 운동</option>
+                  <option value="독서">📖 독서</option>
+                  <option value="음악">🎵 음악</option>
+                  <option value="요리">🍳 요리</option>
+                  <option value="여행">✈️ 여행</option>
+                  <option value="게임">🎮 게임</option>
+                  <option value="영화">🎬 영화</option>
+                  <option value="전시">🎨 전시</option>
+                  <option value="AI">🤖 AI</option>
+                  <option value="창업">💡 창업</option>
+                  <option value="봉사">🤝 봉사</option>
+                  <option value="기타">📌 기타</option>
+                </select>
+              </label>
+              <label>인원<input name="max_members" type="number" min="2" value="5" required /></label>
+            </div>
+            <label>장소<input name="location" placeholder="공학관 301" required /></label>
+            <label>일정<input name="start_at" type="datetime-local" required /></label>
+            <button class="primary-button" type="submit">등록하기</button>
+            <p id="meetingStatus" class="status-text"></p>
+          </form>
+        </section>
+
+        <section id="calendar" class="view" data-title="캘린더" data-subtitle="모임 일정">
+          <div class="month-box">
+            <div class="month-head">
+              <button>‹</button>
+              <strong>2026. 06</strong>
+              <button>›</button>
+            </div>
+            <div class="calendar-grid">
+              <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+              <button></button><button>1</button><button>2</button><button class="active-day">3</button><button>4</button><button>5</button><button>6</button>
+              <button>7</button><button>8</button><button>9</button><button>10</button><button>11</button><button>12</button><button>13</button>
+              <button>14</button><button>15</button><button>16</button><button>17</button><button>18</button><button>19</button><button>20</button>
+            </div>
+          </div>
+          <div id="calendarList" class="list-stack"></div>
+        </section>
+
+        <section id="chat" class="view" data-title="채팅" data-subtitle="실시간 대화">
+          <div id="chatRoomListView" class="chat-room-list"></div>
+        </section>
+
+        <section id="chatRoom" class="view" data-title="채팅방" data-subtitle="실시간 대화">
+          <section class="chat-panel">
+            <div class="chat-head">
+              <strong id="chatRoomTitle">채팅방</strong>
+              <span id="chatState">연결 대기</span>
+            </div>
+            <div id="chatMessages" class="chat-messages"></div>
+            <form id="chatForm" class="chat-form">
+              <input name="content" placeholder="메시지 입력" autocomplete="off" required />
+              <button type="submit" aria-label="전송"></button>
+            </form>
+          </section>
+        </section>
+
+        <section id="profile" class="view" data-title="내 정보" data-subtitle="프로필과 관심사">
+          <div class="profile-panel">
+            <div class="profile-avatar"></div>
+            <h2 id="profileName">게스트</h2>
+            <p id="profileEmail">로그인 후 추천을 받을 수 있어요.</p>
+          </div>
+          <section class="section-block">
+            <div class="section-title">
+              <h2>참여 신청 알림</h2>
+              <button id="refreshApplications" type="button">새로고침</button>
+            </div>
+            <div id="applicationList" class="list-stack"></div>
+          </section>
+          <div class="profile-menu">
+            <button data-view="login">로그인 / 회원가입</button>
+            <button data-view="myposts">내 게시글</button>
+            <button data-view="myapplications">내 신청 모임</button>
+            <button data-view="editprofile">프로필 수정</button>
+            <button id="logoutButton">로그아웃</button>
+            <button data-view="calendar">내 일정</button>
+          </div>
+        </section>
+
+        <section id="notifications" class="view" data-title="알림" data-subtitle="실시간 알림">
+          <div id="notificationList" class="list-stack"></div>
+        </section>
+
+        <section id="myapplications" class="view" data-title="내 신청 모임" data-subtitle="신청 현황">
+          <div id="myApplicationList" class="list-stack"></div>
+        </section>
+
+        <section id="editprofile" class="view" data-title="프로필 수정" data-subtitle="내 정보 변경">
+          <form id="editProfileForm" class="form-screen">
+            <label>이름<input name="name" placeholder="이름" required /></label>
+            <label>자기소개<textarea name="bio" placeholder="자기소개"></textarea></label>
+            <label>관심 분야<input name="interests" placeholder="AI, 러닝, 독서" /></label>
+            <button class="primary-button" type="submit">저장</button>
+            <p id="editProfileStatus" class="status-text"></p>
+          </form>
+        </section>
+
+        <section id="myposts" class="view" data-title="내 게시글" data-subtitle="작성한 글 모아보기">
+          <div class="section-title">
+            <h2 id="myPostsCount">0개의 글</h2>
+            <button id="deleteSelectedPosts" style="color: #f43f5e; display: none;">선택 삭제</button>
+          </div>
+          <div id="myPostList" class="list-stack"></div>
+        </section>
+
+        <section id="login" class="view" data-title="계정" data-subtitle="로그인과 회원가입">
+          <form id="loginForm" class="form-screen compact">
+            <h2>로그인</h2>
+            <label>이메일<input name="email" type="email" placeholder="you@example.com" required /></label>
+            <label>비밀번호<input name="password" type="password" placeholder="비밀번호" required /></label>
+            <button class="primary-button" type="submit">로그인</button>
+          </form>
+          <form id="signupForm" class="form-screen compact">
+            <h2>회원가입</h2>
+            <label>이름<input name="name" placeholder="홍길동" required /></label>
+            <label>이메일<input name="email" type="email" placeholder="you@example.com" required /></label>
+            <label>비밀번호<input name="password" type="password" placeholder="6자 이상" required minlength="6" /></label>
+            <label>관심 분야<input name="interests" placeholder="AI, 러닝, 독서" /></label>
+            <label>자기소개<textarea name="bio" placeholder="짧은 자기소개"></textarea></label>
+            <button class="primary-button" type="submit">가입하기</button>
+            <p id="authStatus" class="status-text"></p>
+          </form>
+        </section>
+      </main>
+
+      <nav class="bottom-nav">
+        <button data-view="home" class="nav-button active">홈</button>
+        <button data-view="meetings" class="nav-button">탐색</button>
+        <button data-view="create" class="nav-button nav-fab">＋</button>
+        <button data-view="chat" class="nav-button">채팅</button>
+        <button data-view="profile" class="nav-button">MY</button>
+      </nav>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
