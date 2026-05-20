@@ -15,41 +15,63 @@
   --card: #ffffff;
   --radius: 16px;
   --radius-sm: 10px;
+  --app-height: 100vh;
+  --app-height: 100dvh;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --header-h: auto;
+  --nav-h: auto;
   font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
   color: var(--ink);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+html {
+  height: 100%;
+  height: var(--app-height);
+}
+
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; border: none; background: none; }
 
 body {
-  display: grid;
-  min-height: 100vh;
-  place-items: center;
-  background: #050505;
+  min-height: 100%;
+  min-height: var(--app-height);
+  overflow: hidden;
+  background: var(--soft);
+  overscroll-behavior: none;
 }
 
 .phone {
-  position: relative;
-  display: grid;
-  grid-template-rows: auto auto 1fr auto;
-  width: min(100vw, 393px);
-  height: min(100vh, 852px);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  height: var(--app-height);
+  min-height: 100%;
+  min-height: var(--app-height);
   overflow: hidden;
-  border-radius: 40px;
   background: var(--soft);
-  box-shadow: 0 40px 80px rgba(0,0,0,0.4);
+}
+
+@supports (-webkit-touch-callout: none) {
+  .phone {
+    min-height: -webkit-fill-available;
+  }
 }
 
 .app-header {
+  flex: 0 0 auto;
   display: grid;
-  grid-template-columns: 40px 1fr 40px;
+  grid-template-columns: 40px 1fr auto auto;
   align-items: center;
-  padding: 8px 16px 12px;
+  gap: 8px;
+  padding: calc(8px + var(--safe-top)) 16px 12px;
   background: var(--soft);
   border-bottom: 1px solid var(--line);
+  z-index: 10;
 }
 
 .app-header h1 {
@@ -111,15 +133,38 @@ body {
 }
 
 .screen-stack {
-  overflow-y: auto;
-  padding: 16px 16px 90px;
-  scroll-behavior: smooth;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 16px;
 }
 
 .screen-stack::-webkit-scrollbar { display: none; }
 
-.view { display: none; }
-.view.active { display: grid; gap: 16px; }
+.view {
+  display: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+.view::-webkit-scrollbar { display: none; }
+
+.view.active {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+#chatRoom.view.active {
+  gap: 0;
+  overflow: hidden;
+}
 
 /* 홈 */
 .home-card {
@@ -289,6 +334,70 @@ body {
   color: var(--ink);
 }
 
+.recommend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recommend-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recommend-row:active {
+  background: var(--soft);
+}
+
+.recommend-tag {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary);
+  background: var(--primary-light);
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+
+.recommend-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.recommend-body strong {
+  font-size: 14px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recommend-body small {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recommend-arrow {
+  flex-shrink: 0;
+  font-size: 18px;
+  color: var(--muted);
+  line-height: 1;
+}
+
 .meeting-description {
   font-size: 12px;
   color: var(--sub);
@@ -446,11 +555,19 @@ textarea { min-height: 90px; resize: vertical; }
   text-align: center;
 }
 
-/* 모임 상세 */
+#detail.view.active {
+  gap: 0;
+}
+
+/* 모임 상세: flex 안에서 줄어들지 않게 → 참여 신청 버튼이 잘리지 않음 */
+#detail.view.active > .detail-panel {
+  flex-shrink: 0;
+}
+
 .detail-panel {
   background: var(--card);
   border-radius: var(--radius);
-  overflow: hidden;
+  overflow: visible;
   box-shadow: 0 2px 12px rgba(0,0,0,0.07);
   display: grid;
   gap: 0;
@@ -665,18 +782,18 @@ textarea { min-height: 90px; resize: vertical; }
 
 /* 채팅방 */
 .chat-panel {
+  flex: 1 1 auto;
+  min-height: 0;
   background: var(--card);
   border-radius: var(--radius);
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  gap: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   box-shadow: 0 2px 12px rgba(0,0,0,0.07);
-  height: calc(100vh - 220px);
-  min-height: 400px;
 }
 
 .chat-head {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -697,6 +814,8 @@ textarea { min-height: 90px; resize: vertical; }
 }
 
 .chat-messages {
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 14px;
   display: flex;
   flex-direction: column;
@@ -745,6 +864,7 @@ textarea { min-height: 90px; resize: vertical; }
 }
 
 .chat-form {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
@@ -866,14 +986,14 @@ textarea { min-height: 90px; resize: vertical; }
 
 /* 하단 네비 */
 .bottom-nav {
-  position: absolute;
-  bottom: 0; left: 0; right: 0;
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  padding: 8px 8px 16px;
-  background: rgba(255,255,255,0.95);
+  padding: 8px 8px calc(12px + var(--safe-bottom));
+  background: rgba(255,255,255, 0.95);
   backdrop-filter: blur(20px);
   border-top: 1px solid var(--line);
+  z-index: 10;
 }
 
 .nav-button {
@@ -948,6 +1068,19 @@ textarea { min-height: 90px; resize: vertical; }
 
 .meeting-item.wide .meeting-cover { height: 140px; }
 
+/* 데스크톱: 기존 폰 프레임 미리보기 */
 @media (min-width: 760px) {
-  .phone { border-radius: 48px; }
+  body {
+    display: grid;
+    place-items: center;
+    background: #050505;
+  }
+
+  .phone {
+    width: min(100vw, 393px);
+    max-height: 852px;
+    height: min(var(--app-height), 852px);
+    border-radius: 48px;
+    box-shadow: 0 40px 80px rgba(0, 0, 0, 0.4);
+  }
 }

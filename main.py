@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from auth import create_access_token, get_current_user, get_user_from_token, hash_password, verify_password
 from database import AsyncSessionLocal, get_db, init_db
+from gemini_recommendations import recommend_meetings_with_gemini
 from models import BoardPost, ChatMessage, Interest, Meeting, MeetingApplication, User
 from schemas import (
     ApplicationCreate,
@@ -280,20 +281,26 @@ async def recommend_meetings(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[MeetingOut]:
-    user_interest_names = {interest.name for interest in current_user.interests}
+    joined = await db.execute(
+        select(MeetingApplication.meeting_id).where(
+            MeetingApplication.user_id == current_user.id,
+            MeetingApplication.status == "approved",
+        )
+    )
+    joined_ids = set(joined.scalars().all())
+
     result = await db.execute(
         select(Meeting)
-        .where(Meeting.start_at >= datetime.utcnow())
+        .where(
+            Meeting.start_at >= datetime.utcnow(),
+            Meeting.owner_id != current_user.id,
+        )
         .options(selectinload(Meeting.owner).selectinload(User.interests))
     )
-    meetings = result.scalars().all()
+    candidates = [m for m in result.scalars().all() if m.id not in joined_ids]
 
-    def score(meeting: Meeting) -> tuple[int, datetime]:
-        category = meeting.category.strip().lower()
-        return (1 if category in user_interest_names else 0, meeting.start_at)
-
-    ranked = sorted(meetings, key=score, reverse=True)
-    return [await serialize_meeting(db, meeting) for meeting in ranked[:10]]
+    ranked = await recommend_meetings_with_gemini(current_user, candidates, limit=8)
+    return [await serialize_meeting(db, meeting) for meeting in ranked]
 
 
 @app.post("/api/meetings/{meeting_id}/apply", response_model=ApplicationOut, status_code=status.HTTP_201_CREATED)

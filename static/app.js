@@ -4,6 +4,8 @@ const viewTriggers = document.querySelectorAll("[data-view]");
 const navButtons = document.querySelectorAll(".nav-button[data-view]");
 const meetingList = document.querySelector("#meetingList");
 const meetingCount = document.querySelector("#meetingCount");
+const recommendSection = document.querySelector("#recommendSection");
+const recommendList = document.querySelector("#recommendList");
 const meetingPageList = document.querySelector("#meetingPageList");
 const calendarList = document.querySelector("#calendarList");
 const chatMessages = document.querySelector("#chatMessages");
@@ -17,6 +19,7 @@ const meetingSearch = document.querySelector("#meetingSearch");
 const applicationList = document.querySelector("#applicationList");
 
 let cachedMeetings = [];
+let cachedRecommendations = [];
 let chatSocket = null;
 let notifySocket = null;
 let activeRoomId = 1;
@@ -115,7 +118,6 @@ function meetingCard(meeting, index = 0, compact = false) {
     "linear-gradient(135deg, #7c3aed, #06b6d4)",
     "linear-gradient(135deg, #0f766e, #f59e0b)",
   ];
-
   return `
     <article class="meeting-item ${compact ? "wide" : ""}" data-meeting-id="${meeting.id}" aria-label="${meeting.title}">
       <div class="meeting-cover" style="background: ${gradients[index % gradients.length]}">
@@ -154,10 +156,53 @@ function emptyCard(title, description) {
   `;
 }
 
+function findMeeting(id) {
+  return (
+    cachedMeetings.find((item) => String(item.id) === String(id)) ||
+    cachedRecommendations.find((item) => String(item.id) === String(id))
+  );
+}
+
+function recommendRow(meeting) {
+  const joined = Math.max(meeting.approved_members || 0, 0);
+  const max = Math.max(meeting.max_members || 1, 1);
+  return `
+    <button type="button" class="recommend-row" data-meeting-id="${meeting.id}">
+      <span class="recommend-tag">${meeting.category}</span>
+      <span class="recommend-body">
+        <strong>${meeting.title}</strong>
+        <small>${meeting.location} · ${formatDate(meeting.start_at)} · ${joined}/${max}명</small>
+      </span>
+      <span class="recommend-arrow" aria-hidden="true">›</span>
+    </button>
+  `;
+}
+
+function renderRecommendations(meetings) {
+  if (!recommendSection || !recommendList) return;
+  if (!authToken()) {
+    recommendSection.hidden = true;
+    return;
+  }
+  cachedRecommendations = meetings || [];
+  if (!cachedRecommendations.length) {
+    recommendSection.hidden = true;
+    return;
+  }
+  recommendSection.hidden = false;
+  recommendList.innerHTML = cachedRecommendations.map(recommendRow).join("");
+  recommendList.querySelectorAll("[data-meeting-id]").forEach((row) => {
+    row.addEventListener("click", () => {
+      const meeting = findMeeting(row.dataset.meetingId);
+      if (meeting) renderMeetingDetail(meeting);
+    });
+  });
+}
+
 function bindMeetingCards() {
-  document.querySelectorAll("[data-meeting-id]").forEach((card) => {
+  document.querySelectorAll("#meetingList [data-meeting-id], #meetingPageList [data-meeting-id]").forEach((card) => {
     card.addEventListener("click", () => {
-      const meeting = cachedMeetings.find((item) => String(item.id) === card.dataset.meetingId);
+      const meeting = findMeeting(card.dataset.meetingId);
       if (meeting) renderMeetingDetail(meeting);
     });
   });
@@ -230,7 +275,8 @@ async function loadMyMeetings() {
 
 function renderMeetingDetail(meeting) {
   const initial = meeting.title.trim().slice(0, 1).toUpperCase();
-  const isOwner = currentUser && meeting.owner.id === currentUser.id;
+  const ownerId = meeting.owner?.id;
+  const isOwner = Boolean(currentUser && ownerId != null && ownerId === currentUser.id);
   const isFull = meeting.approved_members >= meeting.max_members;
   meetingDetail.innerHTML = `
     <div class="detail-hero">${initial}</div>
@@ -368,9 +414,22 @@ window.removeMember = async function(meetingId, userId) {
   }
 }
 
+async function loadRecommendations() {
+  if (!authToken()) {
+    return null;
+  }
+  try {
+    return await api("/api/meetings/recommendations");
+  } catch {
+    return null;
+  }
+}
+
 async function loadMeetings() {
   try {
     cachedMeetings = await api("/api/meetings");
+    const recommendations = await loadRecommendations();
+    renderRecommendations(recommendations || []);
     renderMeetings(cachedMeetings);
     renderMeetingPage(cachedMeetings);
     const myMeetings = await loadMyMeetings();

@@ -2,7 +2,9 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>이음 | 취향 기반 모임 매칭</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
@@ -24,8 +26,8 @@
       <main class="screen-stack">
         <section id="home" class="view active" data-title="이음" data-subtitle="Team 알잘딱깔센">
           <div class="home-card">
-            <p>오늘의 추천</p>
-            <h2>관심사가 맞는 모임을 찾아보세요</h2>
+            <h2>이음에 오신 것을 환영해요</h2>
+            <p>취향에 맞는 모임을 찾고 참여해 보세요.</p>
             <button data-view="meetings" class="primary-button">모임 둘러보기</button>
           </div>
           <div class="shortcut-grid">
@@ -34,16 +36,22 @@
             <button data-view="chat"><span>●</span>채팅</button>
             <button data-view="profile"><span>○</span>MY</button>
           </div>
+          <section id="recommendSection" class="section-block" hidden>
+            <div class="section-title">
+              <h2>맞춤 추천</h2>
+            </div>
+            <div id="recommendList" class="recommend-list"></div>
+          </section>
           <section class="section-block">
             <div class="section-title">
-              <h2>추천 모임</h2>
+              <h2>모임 목록</h2>
             </div>
             <div id="meetingList" class="list-stack"></div>
             <span id="meetingCount" class="hidden-count">0</span>
           </section>
         </section>
 
-        <section id="meetings" class="view" data-title="모임 탐색" data-subtitle="관심사 기반 추천">
+        <section id="meetings" class="view" data-title="모임 탐색" data-subtitle="모임 찾기">
           <div class="search-box">
             <input id="meetingSearch" placeholder="모임명, 카테고리 검색" />
           </div>
@@ -118,9 +126,12 @@
             </div>
             <div class="calendar-grid">
               <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
-              <button></button><button>1</button><button>2</button><button class="active-day">3</button><button>4</button><button>5</button><button>6</button>
+              <button></button>
+              <button>1</button><button>2</button><button class="active-day">3</button><button>4</button><button>5</button><button>6</button>
               <button>7</button><button>8</button><button>9</button><button>10</button><button>11</button><button>12</button><button>13</button>
               <button>14</button><button>15</button><button>16</button><button>17</button><button>18</button><button>19</button><button>20</button>
+              <button>21</button><button>22</button><button>23</button><button>24</button><button>25</button><button>26</button><button>27</button>
+              <button>28</button><button>29</button><button>30</button><button>31</button>
             </div>
           </div>
           <div id="calendarList" class="list-stack"></div>
