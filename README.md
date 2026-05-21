@@ -84,9 +84,13 @@ cp .env.example .env
 ## 실행 방법
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+#1: 가상환경 활성화
+.venv\Scripts\activate
+
+#2: 패키지 설치
 pip install -r requirements.txt
+
+#3: 서버 실행
 uvicorn main:app --reload
 ```
 
