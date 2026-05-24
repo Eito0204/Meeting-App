@@ -7,6 +7,9 @@ const meetingCount = document.querySelector("#meetingCount");
 const recommendSection = document.querySelector("#recommendSection");
 const recommendList = document.querySelector("#recommendList");
 const meetingPageList = document.querySelector("#meetingPageList");
+const myMeetingList = document.querySelector("#myMeetingList");
+const meetingScheduleSection = document.querySelector("#meetingScheduleSection");
+const meetingScheduleList = document.querySelector("#meetingScheduleList");
 const calendarList = document.querySelector("#calendarList");
 const chatMessages = document.querySelector("#chatMessages");
 const chatState = document.querySelector("#chatState");
@@ -20,6 +23,7 @@ const applicationList = document.querySelector("#applicationList");
 
 let cachedMeetings = [];
 let cachedRecommendations = [];
+let cachedMyMeetings = [];
 let chatSocket = null;
 let notifySocket = null;
 let activeRoomId = 1;
@@ -44,6 +48,7 @@ function setView(viewName) {
 
   if (viewName === "notifications") renderNotifications();
   if (viewName === "meetings") loadMeetingPage();
+  if (viewName === "mymeetings") loadMyMeetingView();
   if (viewName === "calendar") loadCalendar();
   if (viewName === "chat") loadChatView();
   if (viewName === "profile") loadApplications();
@@ -159,7 +164,8 @@ function emptyCard(title, description) {
 function findMeeting(id) {
   return (
     cachedMeetings.find((item) => String(item.id) === String(id)) ||
-    cachedRecommendations.find((item) => String(item.id) === String(id))
+    cachedRecommendations.find((item) => String(item.id) === String(id)) ||
+    cachedMyMeetings.find((item) => String(item.id) === String(id))
   );
 }
 
@@ -200,7 +206,7 @@ function renderRecommendations(meetings) {
 }
 
 function bindMeetingCards() {
-  document.querySelectorAll("#meetingList [data-meeting-id], #meetingPageList [data-meeting-id]").forEach((card) => {
+  document.querySelectorAll("#meetingList [data-meeting-id], #meetingPageList [data-meeting-id], #myMeetingList [data-meeting-id]").forEach((card) => {
     card.addEventListener("click", () => {
       const meeting = findMeeting(card.dataset.meetingId);
       if (meeting) renderMeetingDetail(meeting);
@@ -221,6 +227,102 @@ function renderMeetingPage(meetings) {
     ? meetings.map((meeting, index) => meetingCard(meeting, index, true)).join("")
     : emptyCard("탐색할 모임이 없습니다.", "새 모임을 만들면 이곳에 카드로 표시됩니다.");
   bindMeetingCards();
+}
+
+function meetingScheduleCard(schedule) {
+  return `
+    <article class="schedule-item" data-schedule-id="${schedule.id}">
+      <div>
+        <h3>${schedule.activity}</h3>
+        <p>${schedule.settings || "세부 안내가 없습니다."}</p>
+      </div>
+      <div class="schedule-meta">
+        <span>장소 ${schedule.location}</span>
+        <span>${formatDate(schedule.scheduled_at)}</span>
+        <span>정원 ${schedule.capacity}명</span>
+      </div>
+      <div class="schedule-actions">
+        <button class="schedule-join-button" data-schedule-id="${schedule.id}">일정 참여</button>
+      </div>
+      <div id="scheduleParticipants-${schedule.id}" class="schedule-participants" style="display:none;"></div>
+    </article>
+  `;
+}
+
+function renderMeetingSchedules(schedules) {
+  if (!meetingScheduleList) return;
+  meetingScheduleList.innerHTML = schedules.length
+    ? schedules.map((schedule) => meetingScheduleCard(schedule)).join("")
+    : '<div class="empty-panel">아직 등록된 일정이 없습니다.</div>';
+  bindScheduleButtons();
+  schedules.forEach(async (schedule) => {
+    const participants = await loadScheduleParticipants(schedule.id);
+    renderScheduleParticipants(schedule.id, participants);
+  });
+}
+
+async function loadMeetingSchedules(meetingId) {
+  if (!meetingScheduleList) return [];
+  try {
+    return await api(`/api/meetings/${meetingId}/schedules`);
+  } catch {
+    return [];
+  }
+}
+
+async function loadScheduleParticipants(scheduleId) {
+  try {
+    return await api(`/api/schedules/${scheduleId}/participants`);
+  } catch {
+    return [];
+  }
+}
+
+function renderScheduleParticipants(scheduleId, participants) {
+  const container = document.querySelector(`#scheduleParticipants-${scheduleId}`);
+  const actionButton = document.querySelector(`.schedule-join-button[data-schedule-id="${scheduleId}"]`);
+  if (actionButton) {
+    const joined = currentUser ? participants.some((p) => p.user.id === currentUser.id) : false;
+    actionButton.textContent = joined ? "참여 완료" : "일정 참여";
+    actionButton.disabled = joined;
+  }
+  if (!container) return;
+  if (!participants.length) {
+    container.style.display = "none";
+    container.innerHTML = "";
+    return;
+  }
+  container.style.display = "block";
+  container.innerHTML = `
+    <div class="schedule-participant-list">
+      <strong>참여인원:</strong>
+      ${participants.map((p) => `<span>${p.user.name}</span>`).join(", ")}
+    </div>
+  `;
+}
+
+function bindScheduleButtons() {
+  document.querySelectorAll(".schedule-join-button").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const scheduleId = Number(button.dataset.scheduleId);
+      if (!authToken()) {
+        setView("login");
+        return;
+      }
+      button.disabled = true;
+      button.textContent = "신청중...";
+      try {
+        await api(`/api/schedules/${scheduleId}/join`, { method: "POST" });
+        const participants = await loadScheduleParticipants(scheduleId);
+        renderScheduleParticipants(scheduleId, participants);
+        button.textContent = "참여 완료";
+      } catch (err) {
+        button.textContent = "일정 참여";
+        button.disabled = false;
+        alert(err.message || "일정 참여 중 오류가 발생했습니다.");
+      }
+    });
+  });
 }
 
 function renderChatRooms(meetings) {
@@ -273,11 +375,39 @@ async function loadMyMeetings() {
   }
 }
 
+async function loadMyMeetingView() {
+  if (!myMeetingList) return;
+  if (!authToken()) {
+    myMeetingList.innerHTML = '<div class="empty-panel">로그인 후 내 모임 목록을 확인할 수 있습니다.</div>';
+    cachedMyMeetings = [];
+    return;
+  }
+  const meetings = await loadMyMeetings();
+  cachedMyMeetings = meetings;
+  renderMyMeetings(meetings);
+}
+
+function renderMyMeetings(meetings) {
+  if (!myMeetingList) return;
+  myMeetingList.innerHTML = meetings.length
+    ? meetings.map((meeting, index) => meetingCard(meeting, index, true)).join("")
+    : '<div class="empty-panel">참여 중인 모임이나 내가 만든 모임이 없습니다.</div>';
+  bindMeetingCards();
+}
+
 function renderMeetingDetail(meeting) {
   const initial = meeting.title.trim().slice(0, 1).toUpperCase();
   const ownerId = meeting.owner?.id;
   const isOwner = Boolean(currentUser && ownerId != null && ownerId === currentUser.id);
   const isFull = meeting.approved_members >= meeting.max_members;
+  const postSection = document.querySelector("#meetingPostSection");
+  const meetingPostForm = document.querySelector("#meetingPostForm");
+  if (meetingPostForm) {
+    meetingPostForm.dataset.meetingId = meeting.id;
+  }
+  if (postSection) {
+    postSection.style.display = isOwner ? "block" : "none";
+  }
   meetingDetail.innerHTML = `
     <div class="detail-hero">${initial}</div>
     <div>
@@ -324,38 +454,56 @@ function renderMeetingDetail(meeting) {
         alert(error.message);
       }
     });
-  } else {
-    // 참여인원 공개 표시
-    api(`/api/meetings/${meeting.id}/members/all`).then(members => {
-      const el = document.querySelector("#publicMembersList");
-      if (!el || !members.length) return;
-      el.innerHTML = `<div style="padding:10px 0;"><strong style="font-size:13px;">참여인원 ${members.length}명</strong><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">${members.map(m => `<span style="background:var(--primary-light);color:var(--primary);padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;">${m.user.name}</span>`).join('')}</div></div>`;
-    }).catch(() => {});
-    document.querySelector("#applyMeetingButton")?.addEventListener("click", async () => {
-      const status = document.querySelector("#applyStatus");
-      if (!authToken()) {
-        status.textContent = "로그인 후 참여 신청할 수 있습니다.";
-        setView("login");
-        return;
-      }
-      try {
-        await api(`/api/meetings/${meeting.id}/apply`, {
-          method: "POST",
-          body: JSON.stringify({ message: "참여하고 싶어요." }),
-        });
-        status.textContent = "참여 신청이 완료되었습니다. 모임장 승인을 기다려주세요.";
-      } catch (error) {
-        status.textContent = error.message;
-      }
-    });
   }
 
-  // 모임 게시판
-  const postSection = document.querySelector("#meetingPostSection");
-  postSection.style.display = "block";
-  const meetingPostForm = document.querySelector("#meetingPostForm");
-  meetingPostForm.dataset.meetingId = meeting.id;
-  loadMeetingPosts(meeting.id);
+  const scheduleForm = document.querySelector("#meetingScheduleForm");
+  if (meetingScheduleSection) {
+    meetingScheduleSection.style.display = "block";
+  }
+  if (scheduleForm) {
+    scheduleForm.style.display = isOwner ? "grid" : "none";
+    document.querySelector("#meetingScheduleStatus").textContent = "";
+  }
+
+  api(`/api/meetings/${meeting.id}/members/all`).then((members) => {
+    const el = document.querySelector("#publicMembersList");
+    if (el && members.length) {
+      el.innerHTML = `<div style="padding:10px 0;"><strong style="font-size:13px;">참여인원 ${members.length}명</strong><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">${members
+        .map(
+          (m) => `<span style="background:var(--primary-light);color:var(--primary);padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;">${m.user.name}</span>`,
+        )
+        .join("")}</div></div>`;
+    }
+
+    const currentMember = currentUser ? members.some((m) => m.user.id === currentUser.id) : false;
+    if (postSection) {
+      postSection.style.display = currentMember || isOwner ? "block" : "none";
+    }
+  }).catch(() => {
+    if (postSection) {
+      postSection.style.display = isOwner ? "block" : "none";
+    }
+  });
+
+  document.querySelector("#applyMeetingButton")?.addEventListener("click", async () => {
+    const status = document.querySelector("#applyStatus");
+    if (!authToken()) {
+      status.textContent = "로그인 후 참여 신청할 수 있습니다.";
+      setView("login");
+      return;
+    }
+    try {
+      await api(`/api/meetings/${meeting.id}/apply`, {
+        method: "POST",
+        body: JSON.stringify({ message: "참여하고 싶어요." }),
+      });
+      status.textContent = "참여 신청이 완료되었습니다. 모임장 승인을 기다려주세요.";
+    } catch (error) {
+      status.textContent = error.message;
+    }
+  });
+
+  loadMeetingSchedules(meeting.id).then(renderMeetingSchedules);
 
   const postForm = document.querySelector("#meetingPostForm");
   postForm.onsubmit = async (e) => {
@@ -376,6 +524,33 @@ function renderMeetingDetail(meeting) {
       postStatus.textContent = err.message;
     }
   };
+
+  const scheduleFormEl = document.querySelector("#meetingScheduleForm");
+  if (scheduleFormEl) {
+    scheduleFormEl.onsubmit = async (e) => {
+      e.preventDefault();
+      if (!authToken()) { setView("login"); return; }
+      const fd = new FormData(scheduleFormEl);
+      const scheduleStatus = document.querySelector("#meetingScheduleStatus");
+      try {
+        await api(`/api/meetings/${meeting.id}/schedules`, {
+          method: "POST",
+          body: JSON.stringify({
+            location: fd.get("location"),
+            scheduled_at: new Date(fd.get("scheduled_at")).toISOString(),
+            activity: fd.get("activity"),
+            capacity: Number(fd.get("capacity")),
+            settings: fd.get("settings"),
+          }),
+        });
+        scheduleFormEl.reset();
+        scheduleStatus.textContent = "일정이 추가되었습니다.";
+        await loadMeetingSchedules(meeting.id).then(renderMeetingSchedules);
+      } catch (err) {
+        scheduleStatus.textContent = err.message;
+      }
+    };
+  }
 
   document.querySelector("#refreshMeetingPosts").onclick = () => loadMeetingPosts(meeting.id);
 

@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from auth import create_access_token, get_current_user, get_user_from_token, hash_password, verify_password
 from database import AsyncSessionLocal, get_db, init_db
 from gemini_recommendations import recommend_meetings_with_gemini
-from models import BoardPost, ChatMessage, Interest, Meeting, MeetingApplication, User
+from models import BoardPost, ChatMessage, Interest, Meeting, MeetingApplication, MeetingSchedule, MeetingScheduleParticipant, User
 from schemas import (
     ApplicationCreate,
     ApplicationDecision,
@@ -24,7 +24,10 @@ from schemas import (
     ChatMessageOut,
     MeetingCreate,
     MeetingOut,
+    MeetingScheduleCreate,
+    MeetingScheduleOut,
     MeetingUpdate,
+    ScheduleParticipantOut,
     Token,
     UserCreate,
     UserLogin,
@@ -116,6 +119,17 @@ async def approved_member_count(db: AsyncSession, meeting_id: int) -> int:
         )
     )
     return int(result.scalar() or 0)
+
+async def is_approved_meeting_member(db: AsyncSession, meeting_id: int, user_id: int) -> bool:
+    result = await db.execute(
+        select(MeetingApplication)
+        .where(
+            MeetingApplication.meeting_id == meeting_id,
+            MeetingApplication.user_id == user_id,
+            MeetingApplication.status == "approved",
+        )
+    )
+    return result.scalar_one_or_none() is not None
 
 
 async def serialize_meeting(db: AsyncSession, meeting: Meeting) -> MeetingOut:
@@ -243,10 +257,7 @@ async def create_meeting(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> MeetingOut:
-    if payload.end_at and payload.end_at <= payload.start_at:
-        raise HTTPException(status_code=400, detail="종료 시간은 시작 시간보다 뒤여야 합니다.")
-
-    meeting = Meeting(**payload.model_dump(), owner_id=current_user.id)
+    meeting = Meeting(**payload.model_dump(), owner_id=current_user.id, start_at=datetime.utcnow())
     db.add(meeting)
     await db.flush()
     db.add(MeetingApplication(meeting_id=meeting.id, user_id=current_user.id, status="approved"))
@@ -483,6 +494,13 @@ async def create_post(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BoardPost:
+    if payload.meeting_id is not None:
+        meeting = await db.get(Meeting, payload.meeting_id)
+        if not meeting:
+            raise HTTPException(status_code=404, detail="모임을 찾을 수 없습니다.")
+        if not await is_approved_meeting_member(db, payload.meeting_id, current_user.id):
+            raise HTTPException(status_code=403, detail="모임에 속한 멤버만 게시글을 작성할 수 있습니다.")
+
     post = BoardPost(**payload.model_dump(), author_id=current_user.id)
     db.add(post)
     await db.commit()
@@ -513,6 +531,80 @@ async def list_meeting_posts(meeting_id: int, db: AsyncSession = Depends(get_db)
         .options(selectinload(BoardPost.author).selectinload(User.interests))
     )
     return list(result.scalars().all())
+
+
+@app.post("/api/meetings/{meeting_id}/schedules", response_model=MeetingScheduleOut, status_code=status.HTTP_201_CREATED)
+async def create_meeting_schedule(
+    meeting_id: int,
+    payload: MeetingScheduleCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MeetingSchedule:
+    meeting = await db.get(Meeting, meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="모임을 찾을 수 없습니다.")
+    if meeting.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="모임장만 일정을 추가할 수 있습니다.")
+    schedule = MeetingSchedule(meeting_id=meeting.id, **payload.model_dump())
+    db.add(schedule)
+    await db.commit()
+    result = await db.execute(
+        select(MeetingSchedule).where(MeetingSchedule.id == schedule.id)
+    )
+    return result.scalar_one()
+
+
+@app.get("/api/meetings/{meeting_id}/schedules", response_model=list[MeetingScheduleOut])
+async def list_meeting_schedules(meeting_id: int, db: AsyncSession = Depends(get_db)) -> list[MeetingSchedule]:
+    result = await db.execute(
+        select(MeetingSchedule)
+        .where(MeetingSchedule.meeting_id == meeting_id)
+        .order_by(MeetingSchedule.scheduled_at)
+    )
+    return list(result.scalars().all())
+
+
+@app.get("/api/schedules/{schedule_id}/participants", response_model=list[ScheduleParticipantOut])
+async def list_schedule_participants(schedule_id: int, db: AsyncSession = Depends(get_db)) -> list[MeetingScheduleParticipant]:
+    result = await db.execute(
+        select(MeetingScheduleParticipant)
+        .where(MeetingScheduleParticipant.schedule_id == schedule_id)
+        .order_by(MeetingScheduleParticipant.created_at)
+        .options(selectinload(MeetingScheduleParticipant.user).selectinload(User.interests))
+    )
+    return list(result.scalars().all())
+
+
+@app.post("/api/schedules/{schedule_id}/join", response_model=ScheduleParticipantOut, status_code=status.HTTP_201_CREATED)
+async def join_schedule(
+    schedule_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MeetingScheduleParticipant:
+    schedule = await db.get(MeetingSchedule, schedule_id)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
+    if not await is_approved_meeting_member(db, schedule.meeting_id, current_user.id):
+        raise HTTPException(status_code=403, detail="모임 멤버만 일정에 참여할 수 있습니다.")
+    result = await db.execute(
+        select(MeetingScheduleParticipant).where(
+            MeetingScheduleParticipant.schedule_id == schedule_id,
+            MeetingScheduleParticipant.user_id == current_user.id,
+        )
+    )
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="이미 이 일정에 참여 신청되어 있습니다.")
+    count_result = await db.execute(
+        select(func.count(MeetingScheduleParticipant.id)).where(MeetingScheduleParticipant.schedule_id == schedule_id)
+    )
+    joined_count = int(count_result.scalar() or 0)
+    if joined_count >= schedule.capacity:
+        raise HTTPException(status_code=400, detail="이 일정은 이미 정원이 꽉 찼습니다.")
+    participant = MeetingScheduleParticipant(schedule_id=schedule_id, user_id=current_user.id)
+    db.add(participant)
+    await db.commit()
+    await db.refresh(participant)
+    return participant
 
 
 @app.get("/api/my-posts", response_model=list[BoardPostOut])

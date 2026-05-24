@@ -60,8 +60,35 @@ class MeetingCreate(BaseModel):
     category: str = Field(min_length=2, max_length=50)
     location: str = Field(min_length=2, max_length=120)
     max_members: int = Field(ge=2, le=200)
-    start_at: datetime
     end_at: datetime | None = None
+
+
+class MeetingScheduleCreate(BaseModel):
+    location: str = Field(min_length=2, max_length=120)
+    scheduled_at: datetime
+    activity: str = Field(min_length=2)
+    capacity: int = Field(ge=1, le=200)
+    settings: str | None = None
+
+
+class MeetingScheduleOut(BaseModel):
+    id: int
+    meeting_id: int
+    location: str
+    scheduled_at: datetime
+    activity: str
+    capacity: int
+    settings: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ScheduleParticipantOut(BaseModel):
+    user: UserOut
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class MeetingOut(BaseModel):
@@ -117,6 +144,27 @@ class BoardPostCreate(BaseModel):
     title: str = Field(min_length=2, max_length=120)
     content: str = Field(min_length=2)
     meeting_id: int | None = None
+
+
+class MeetingScheduleCreate(BaseModel):
+    location: str = Field(min_length=2, max_length=120)
+    scheduled_at: datetime
+    activity: str = Field(min_length=2)
+    capacity: int = Field(ge=1, le=200)
+    settings: str | None = None
+
+
+class MeetingScheduleOut(BaseModel):
+    id: int
+    meeting_id: int
+    location: str
+    scheduled_at: datetime
+    activity: str
+    capacity: int
+    settings: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class BoardPostOut(BaseModel):

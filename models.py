@@ -63,6 +63,7 @@ class Meeting(Base):
     applications: Mapped[list["MeetingApplication"]] = relationship(back_populates="meeting")
     posts: Mapped[list["BoardPost"]] = relationship(back_populates="meeting")
     messages: Mapped[list["ChatMessage"]] = relationship(back_populates="meeting")
+    schedules: Mapped[list["MeetingSchedule"]] = relationship(back_populates="meeting")
 
 
 class MeetingApplication(Base):
@@ -92,6 +93,35 @@ class BoardPost(Base):
 
     meeting: Mapped[Meeting | None] = relationship(back_populates="posts", lazy="selectin")
     author: Mapped[User] = relationship(lazy="selectin")
+
+
+class MeetingSchedule(Base):
+    __tablename__ = "meeting_schedules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id", ondelete="CASCADE"))
+    location: Mapped[str] = mapped_column(String(120))
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime)
+    activity: Mapped[str] = mapped_column(Text)
+    capacity: Mapped[int] = mapped_column(Integer)
+    settings: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    meeting: Mapped[Meeting] = relationship(back_populates="schedules", lazy="selectin")
+    participants: Mapped[list["MeetingScheduleParticipant"]] = relationship(back_populates="schedule")
+
+
+class MeetingScheduleParticipant(Base):
+    __tablename__ = "meeting_schedule_participants"
+    __table_args__ = (UniqueConstraint("schedule_id", "user_id", name="uq_schedule_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    schedule_id: Mapped[int] = mapped_column(ForeignKey("meeting_schedules.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    schedule: Mapped[MeetingSchedule] = relationship(back_populates="participants", lazy="selectin")
+    user: Mapped[User] = relationship(lazy="selectin")
 
 
 class ChatMessage(Base):
