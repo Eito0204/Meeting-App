@@ -6,17 +6,16 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>이음 | 취향 기반 모임 매칭</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260526-3" />
   </head>
   <body>
     <div id="app" class="phone">
       <header class="app-header">
         <button class="icon-button" id="backButton" aria-label="뒤로 가기"></button>
         <div>
-          <p id="screenSubTitle">Team 알잘딱깔센</p>
+          <p id="screenSubTitle"></p>
           <h1 id="screenTitle">이음</h1>
         </div>
-        <button class="profile-dot" data-view="profile" aria-label="내 정보"></button>
         <button id="notifyButton" style="position:relative;width:36px;height:36px;border-radius:50%;background:var(--line);border:none;display:grid;place-items:center;" aria-label="알림">
           <span id="notifyIcon" style="font-size:16px;">&#128276;</span>
           <span id="notifyBadge" style="display:none;position:absolute;top:2px;right:2px;width:10px;height:10px;border-radius:50%;background:#f43f5e;"></span>
@@ -24,25 +23,15 @@
       </header>
 
       <main class="screen-stack">
-        <section id="home" class="view active" data-title="이음" data-subtitle="Team 알잘딱깔센">
-          <div class="home-card">
-            <h2>이음에 오신 것을 환영해요</h2>
-            <p>취향에 맞는 모임을 찾고 참여해 보세요.</p>
-            <button data-view="meetings" class="primary-button">모임 둘러보기</button>
-          </div>
+        <section id="home" class="view active" data-title="이음" data-subtitle="">
           <div class="shortcut-grid">
             <button data-view="mymeetings"><span>★</span>내 모임</button>
             <button data-view="create"><span>＋</span>모임 만들기</button>
             <button data-view="calendar"><span>□</span>일정</button>
             <button data-view="chat"><span>●</span>채팅</button>
             <button data-view="profile"><span>○</span>MY</button>
+            <button data-view="recommend"><span>💡</span>추천</button>
           </div>
-          <section id="recommendSection" class="section-block" hidden>
-            <div class="section-title">
-              <h2>맞춤 추천</h2>
-            </div>
-            <div id="recommendList" class="recommend-list"></div>
-          </section>
           <section class="section-block">
             <div class="section-title">
               <h2>모임 목록</h2>
@@ -67,6 +56,15 @@
             <button>전시</button>
           </div>
           <div id="meetingPageList" class="list-stack"></div>
+        </section>
+
+        <section id="recommend" class="view" data-title="추천 모임" data-subtitle="맞춤 추천">
+          <section id="recommendSection" class="section-block">
+            <div class="section-title">
+              <h2>모임추천</h2>
+            </div>
+            <div id="recommendList" class="recommend-list"></div>
+          </section>
         </section>
 
         <section id="mymeetings" class="view" data-title="내 모임" data-subtitle="내가 속한 모임">
@@ -95,19 +93,6 @@
               <button class="primary-button" type="submit">일정 추가</button>
               <p id="meetingScheduleStatus" class="status-text"></p>
             </form>
-          </div>
-          <div id="meetingPostSection" style="display:none;">
-            <div class="section-title" style="margin-top:16px;">
-              <h2>모임 게시판</h2>
-              <button id="refreshMeetingPosts">새로고침</button>
-            </div>
-            <form id="meetingPostForm" class="post-compose" style="margin-bottom:12px;">
-              <input name="title" placeholder="제목" required />
-              <textarea name="content" placeholder="내용을 입력하세요." required></textarea>
-              <button class="primary-button" type="submit">등록</button>
-              <p id="meetingPostStatus" class="status-text"></p>
-            </form>
-            <div id="meetingPostList" class="list-stack"></div>
           </div>
         </section>
 
@@ -145,18 +130,12 @@
         <section id="calendar" class="view" data-title="캘린더" data-subtitle="모임 일정">
           <div class="month-box">
             <div class="month-head">
-              <button>‹</button>
-              <strong>2026. 06</strong>
-              <button>›</button>
+              <button id="calendarPrev" type="button">‹</button>
+              <strong id="calendarMonthLabel">2026. 06</strong>
+              <button id="calendarNext" type="button">›</button>
             </div>
-            <div class="calendar-grid">
+            <div id="calendarGrid" class="calendar-grid">
               <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
-              <button></button>
-              <button>1</button><button>2</button><button class="active-day">3</button><button>4</button><button>5</button><button>6</button>
-              <button>7</button><button>8</button><button>9</button><button>10</button><button>11</button><button>12</button><button>13</button>
-              <button>14</button><button>15</button><button>16</button><button>17</button><button>18</button><button>19</button><button>20</button>
-              <button>21</button><button>22</button><button>23</button><button>24</button><button>25</button><button>26</button><button>27</button>
-              <button>28</button><button>29</button><button>30</button><button>31</button>
             </div>
           </div>
           <div id="calendarList" class="list-stack"></div>
@@ -185,6 +164,7 @@
             <div class="profile-avatar"></div>
             <h2 id="profileName">게스트</h2>
             <p id="profileEmail">로그인 후 추천을 받을 수 있어요.</p>
+            <p id="profileRegion">지역 설정을 추가해 주세요.</p>
           </div>
           <section class="section-block">
             <div class="section-title">
@@ -216,6 +196,7 @@
             <label>이름<input name="name" placeholder="이름" required /></label>
             <label>자기소개<textarea name="bio" placeholder="자기소개"></textarea></label>
             <label>관심 분야<input name="interests" placeholder="AI, 러닝, 독서" /></label>
+            <label>지역 설정<input name="region" placeholder="예: 강남, 홍대, 카페" /></label>
             <button class="primary-button" type="submit">저장</button>
             <p id="editProfileStatus" class="status-text"></p>
           </form>
@@ -257,6 +238,6 @@
         <button data-view="profile" class="nav-button">MY</button>
       </nav>
     </div>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260526-2"></script>
   </body>
 </html>

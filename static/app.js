@@ -20,6 +20,39 @@ const screenSubTitle = document.querySelector("#screenSubTitle");
 const meetingDetail = document.querySelector("#meetingDetail");
 const meetingSearch = document.querySelector("#meetingSearch");
 const applicationList = document.querySelector("#applicationList");
+const userRegionKey = "meeting_app_user_region";
+const calendarGrid = document.querySelector("#calendarGrid");
+const calendarMonthLabel = document.querySelector("#calendarMonthLabel");
+const calendarPrev = document.querySelector("#calendarPrev");
+const calendarNext = document.querySelector("#calendarNext");
+
+if (screenSubTitle) {
+  screenSubTitle.textContent = "";
+}
+if (document.querySelector(".home-card")) {
+  document.querySelector(".home-card").remove();
+}
+
+const header = document.querySelector(".app-header");
+const headerCenter = header?.querySelector("div");
+if (header) {
+  header.style.display = "flex";
+  header.style.alignItems = "center";
+  header.style.justifyContent = "space-between";
+  header.style.position = "relative";
+}
+if (headerCenter) {
+  headerCenter.style.position = "absolute";
+  headerCenter.style.left = "50%";
+  headerCenter.style.transform = "translateX(-50%)";
+  headerCenter.style.display = "flex";
+  headerCenter.style.flexDirection = "column";
+  headerCenter.style.alignItems = "center";
+  headerCenter.style.justifyContent = "center";
+}
+if (document.querySelector(".profile-dot")) {
+  document.querySelector(".profile-dot").remove();
+}
 
 let cachedMeetings = [];
 let cachedRecommendations = [];
@@ -39,15 +72,18 @@ function setView(viewName) {
   views.forEach((view) => view.classList.toggle("active", view.id === viewName));
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === viewName));
   const currentView = document.querySelector(`#${viewName}`);
-  if (currentView) {
-    screenTitle.textContent = currentView.dataset.title || "이음";
-    screenSubTitle.textContent = currentView.dataset.subtitle || "Team 알잘딱깔센";
+  const currentTitle = document.querySelector("#screenTitle");
+  const currentSubTitle = document.querySelector("#screenSubTitle");
+  if (currentView && currentTitle && currentSubTitle) {
+    currentTitle.textContent = currentView.dataset.title || "이음";
+    currentSubTitle.textContent = viewName === "home" ? "" : (currentView.dataset.subtitle ?? "");
   }
   const backButton = document.querySelector("#backButton");
   if (backButton) backButton.style.visibility = viewHistory.length > 0 ? "visible" : "hidden";
 
   if (viewName === "notifications") renderNotifications();
   if (viewName === "meetings") loadMeetingPage();
+  if (viewName === "recommend") loadRecommendationView();
   if (viewName === "mymeetings") loadMyMeetingView();
   if (viewName === "calendar") loadCalendar();
   if (viewName === "chat") loadChatView();
@@ -63,9 +99,11 @@ document.querySelector("#backButton").addEventListener("click", () => {
   views.forEach((view) => view.classList.toggle("active", view.id === prev));
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === prev));
   const prevView = document.querySelector(`#${prev}`);
-  if (prevView) {
-    screenTitle.textContent = prevView.dataset.title || "이음";
-    screenSubTitle.textContent = prevView.dataset.subtitle || "Team 알잘딱깔센";
+  const currentTitle = document.querySelector("#screenTitle");
+  const currentSubTitle = document.querySelector("#screenSubTitle");
+  if (prevView && currentTitle && currentSubTitle) {
+    currentTitle.textContent = prevView.dataset.title || "이음";
+    currentSubTitle.textContent = prev === "home" ? "" : (prevView.dataset.subtitle ?? "");
   }
   const backButton = document.querySelector("#backButton");
   if (backButton) backButton.style.visibility = viewHistory.length > 0 ? "visible" : "hidden";
@@ -78,6 +116,36 @@ function authHeaders() {
 
 function authToken() {
   return localStorage.getItem(tokenKey);
+}
+
+function normalizeRegion(value) {
+  return (value || "").trim().replace(/\s+/g, " ");
+}
+
+function getUserRegion() {
+  return normalizeRegion(localStorage.getItem(userRegionKey));
+}
+
+function setUserRegion(value) {
+  const region = normalizeRegion(value);
+  if (!region) {
+    localStorage.removeItem(userRegionKey);
+    return "";
+  }
+  localStorage.setItem(userRegionKey, region);
+  return region;
+}
+
+function meetingMatchesRegion(meeting) {
+  const region = getUserRegion();
+  if (!region) {
+    return true;
+  }
+  return meeting.location?.toLowerCase().includes(region.toLowerCase());
+}
+
+function filterMeetingsByRegion(meetings) {
+  return (meetings || []).filter(meetingMatchesRegion);
 }
 
 async function api(path, options = {}) {
@@ -186,16 +254,11 @@ function recommendRow(meeting) {
 
 function renderRecommendations(meetings) {
   if (!recommendSection || !recommendList) return;
-  if (!authToken()) {
-    recommendSection.hidden = true;
-    return;
-  }
-  cachedRecommendations = meetings || [];
+  cachedRecommendations = filterMeetingsByRegion(meetings || []);
   if (!cachedRecommendations.length) {
-    recommendSection.hidden = true;
+    recommendList.innerHTML = '<div class="empty-panel">설정한 지역에 맞는 추천 모임이 없습니다.</div>';
     return;
   }
-  recommendSection.hidden = false;
   recommendList.innerHTML = cachedRecommendations.map(recommendRow).join("");
   recommendList.querySelectorAll("[data-meeting-id]").forEach((row) => {
     row.addEventListener("click", () => {
@@ -203,6 +266,17 @@ function renderRecommendations(meetings) {
       if (meeting) renderMeetingDetail(meeting);
     });
   });
+}
+
+async function loadRecommendationView() {
+  if (!authToken()) {
+    recommendList.innerHTML = '<div class="empty-panel">로그인 후 추천을 받을 수 있어요.</div>';
+    return;
+  }
+  if (!cachedRecommendations.length) {
+    cachedRecommendations = (await loadRecommendations()) || [];
+  }
+  renderRecommendations(cachedRecommendations);
 }
 
 function bindMeetingCards() {
@@ -215,16 +289,18 @@ function bindMeetingCards() {
 }
 
 function renderMeetings(meetings) {
-  meetingCount.textContent = meetings.length;
-  meetingList.innerHTML = meetings.length
-    ? meetings.map((meeting, index) => meetingCard(meeting, index)).join("")
+  const filteredMeetings = filterMeetingsByRegion(meetings);
+  meetingCount.textContent = filteredMeetings.length;
+  meetingList.innerHTML = filteredMeetings.length
+    ? filteredMeetings.map((meeting, index) => meetingCard(meeting, index)).join("")
     : emptyCard("아직 등록된 모임이 없습니다.", "첫 모임을 만들어 피드에 보여주세요.");
   bindMeetingCards();
 }
 
 function renderMeetingPage(meetings) {
-  meetingPageList.innerHTML = meetings.length
-    ? meetings.map((meeting, index) => meetingCard(meeting, index, true)).join("")
+  const filteredMeetings = filterMeetingsByRegion(meetings);
+  meetingPageList.innerHTML = filteredMeetings.length
+    ? filteredMeetings.map((meeting, index) => meetingCard(meeting, index, true)).join("")
     : emptyCard("탐색할 모임이 없습니다.", "새 모임을 만들면 이곳에 카드로 표시됩니다.");
   bindMeetingCards();
 }
@@ -395,19 +471,38 @@ function renderMyMeetings(meetings) {
   bindMeetingCards();
 }
 
+function renderCalendarGrid() {
+  if (!calendarGrid || !calendarMonthLabel) return;
+
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
+
+  const monthLabel = `${currentYear}. ${String(currentMonth + 1).padStart(2, "0")}`;
+  calendarMonthLabel.textContent = monthLabel;
+
+  const firstDay = new Date(currentYear, currentMonth, 1);
+  const lastDay = new Date(currentYear, currentMonth + 1, 0);
+  const startOffset = firstDay.getDay();
+
+  const cells = [];
+  for (let i = 0; i < startOffset; i += 1) {
+    cells.push('<button type="button" aria-hidden="true"></button>');
+  }
+
+  for (let day = 1; day <= lastDay.getDate(); day += 1) {
+    const isToday = day === today.getDate();
+    cells.push(`<button type="button" class="${isToday ? "active-day" : ""}">${day}</button>`);
+  }
+
+  calendarGrid.innerHTML = ['<span>일</span>','<span>월</span>','<span>화</span>','<span>수</span>','<span>목</span>','<span>금</span>','<span>토</span>', ...cells].join('');
+}
+
 function renderMeetingDetail(meeting) {
   const initial = meeting.title.trim().slice(0, 1).toUpperCase();
   const ownerId = meeting.owner?.id;
   const isOwner = Boolean(currentUser && ownerId != null && ownerId === currentUser.id);
   const isFull = meeting.approved_members >= meeting.max_members;
-  const postSection = document.querySelector("#meetingPostSection");
-  const meetingPostForm = document.querySelector("#meetingPostForm");
-  if (meetingPostForm) {
-    meetingPostForm.dataset.meetingId = meeting.id;
-  }
-  if (postSection) {
-    postSection.style.display = isOwner ? "block" : "none";
-  }
   meetingDetail.innerHTML = `
     <div class="detail-hero">${initial}</div>
     <div>
@@ -422,9 +517,11 @@ function renderMeetingDetail(meeting) {
       <span>참여 ${meeting.approved_members}/${meeting.max_members}명</span>
     </div>
     ${isOwner ? `
-      <button class="primary-button" type="button" id="editMeetingButton" data-id="${meeting.id}">모임 수정</button>
-      <button class="primary-button" type="button" id="manageMembersButton" data-id="${meeting.id}">참여인원 관리</button>
-      <button class="primary-button" type="button" id="deleteMeetingButton" data-id="${meeting.id}" style="background:#f43f5e;">모임 삭제</button>
+      <div class="detail-actions">
+        <button class="detail-action-button" type="button" id="editMeetingButton" data-id="${meeting.id}">✏️ 모임 수정</button>
+        <button class="detail-action-button" type="button" id="manageMembersButton" data-id="${meeting.id}">👥 참여인원 관리</button>
+        <button class="detail-action-button detail-action-button-danger" type="button" id="deleteMeetingButton" data-id="${meeting.id}">🗑️ 모임 삭제</button>
+      </div>
     ` : `
       ${!isFull ? '<button class="primary-button" type="button" id="applyMeetingButton">참여 신청</button>' : '<button class="primary-button" type="button" disabled style="background:#94a3b8;">모집 마감</button>'}
     `}
@@ -474,16 +571,7 @@ function renderMeetingDetail(meeting) {
         )
         .join("")}</div></div>`;
     }
-
-    const currentMember = currentUser ? members.some((m) => m.user.id === currentUser.id) : false;
-    if (postSection) {
-      postSection.style.display = currentMember || isOwner ? "block" : "none";
-    }
-  }).catch(() => {
-    if (postSection) {
-      postSection.style.display = isOwner ? "block" : "none";
-    }
-  });
+  }).catch(() => {});
 
   document.querySelector("#applyMeetingButton")?.addEventListener("click", async () => {
     const status = document.querySelector("#applyStatus");
@@ -504,26 +592,6 @@ function renderMeetingDetail(meeting) {
   });
 
   loadMeetingSchedules(meeting.id).then(renderMeetingSchedules);
-
-  const postForm = document.querySelector("#meetingPostForm");
-  postForm.onsubmit = async (e) => {
-    e.preventDefault();
-    if (!authToken()) { setView("login"); return; }
-    const fd = new FormData(postForm);
-    const mid = Number(postForm.dataset.meetingId);
-    const postStatus = document.querySelector("#meetingPostStatus");
-    try {
-      await api("/api/posts", {
-        method: "POST",
-        body: JSON.stringify({ title: fd.get("title"), content: fd.get("content"), meeting_id: mid }),
-      });
-      postForm.reset();
-      postStatus.textContent = "";
-      await loadMeetingPosts(mid);
-    } catch (err) {
-      postStatus.textContent = err.message;
-    }
-  };
 
   const scheduleFormEl = document.querySelector("#meetingScheduleForm");
   if (scheduleFormEl) {
@@ -551,8 +619,6 @@ function renderMeetingDetail(meeting) {
       }
     };
   }
-
-  document.querySelector("#refreshMeetingPosts").onclick = () => loadMeetingPosts(meeting.id);
 
   setView("detail");
 }
@@ -603,8 +669,7 @@ async function loadRecommendations() {
 async function loadMeetings() {
   try {
     cachedMeetings = await api("/api/meetings");
-    const recommendations = await loadRecommendations();
-    renderRecommendations(recommendations || []);
+    cachedRecommendations = (await loadRecommendations()) || [];
     renderMeetings(cachedMeetings);
     renderMeetingPage(cachedMeetings);
     const myMeetings = await loadMyMeetings();
@@ -625,58 +690,14 @@ async function loadMeetingPage() {
     return;
   }
   const keyword = meetingSearch?.value.trim().toLowerCase() || "";
-  const location = document.querySelector("#locationSearch")?.value.trim().toLowerCase() || "";
+  const searchLocation = document.querySelector("#locationSearch")?.value.trim().toLowerCase() || "";
+  const activeRegion = searchLocation || getUserRegion().toLowerCase();
   const filtered = cachedMeetings.filter((meeting) => {
     const matchKeyword = !keyword || [meeting.title, meeting.category, meeting.description, meeting.location].join(" ").toLowerCase().includes(keyword);
-    const matchLocation = !location || meeting.location.toLowerCase().includes(location);
+    const matchLocation = !activeRegion || meeting.location.toLowerCase().includes(activeRegion);
     return matchKeyword && matchLocation;
   });
   renderMeetingPage(filtered);
-}
-
-window.deletePost = async function(postId) {
-  if (!confirm("정말 이 게시글을 삭제하시겠습니까?")) return;
-  try {
-    await api(`/api/posts/${postId}`, { method: "DELETE" });
-    alert("게시글이 삭제되었습니다.");
-    await loadPosts();
-  } catch (error) {
-    alert(error.message);
-  }
-}
-
-async function loadMeetingPosts(meetingId) {
-  const list = document.querySelector("#meetingPostList");
-  try {
-    const posts = await api(`/api/meetings/${meetingId}/posts`);
-    list.innerHTML = posts.length
-      ? posts.map(post => `
-          <article class="post-item">
-            <span class="thumb"></span>
-            <div>
-              <small>${post.author?.name || ''} · ${formatDate(post.created_at)}</small>
-              <h3>${post.title}</h3>
-              <p>${post.content}</p>
-              ${currentUser && post.author.id === currentUser.id ? `
-                <div style="margin-top:8px;display:flex;gap:6px;">
-                  <button onclick="deletePost(${post.id}, ${meetingId})" style="background:#f43f5e;color:white;padding:4px 10px;border:none;border-radius:6px;cursor:pointer;font-size:12px;">삭제</button>
-                </div>` : ''}
-            </div>
-          </article>`).join("")
-      : '<div class="empty-panel">아직 게시글이 없습니다.</div>';
-  } catch (e) {
-    list.innerHTML = `<div class="empty-panel">${e.message}</div>`;
-  }
-}
-
-window.deletePost = async function(postId, meetingId) {
-  if (!confirm("정말 삭제하시겠습니까?")) return;
-  try {
-    await api(`/api/posts/${postId}`, { method: "DELETE" });
-    await loadMeetingPosts(meetingId);
-  } catch (e) {
-    alert(e.message);
-  }
 }
 
 function connectNotifySocket() {
@@ -788,6 +809,7 @@ async function loadEditProfile() {
   form.name.value = currentUser.name || '';
   form.bio.value = currentUser.bio || '';
   form.interests.value = currentUser.interests?.map(i => i.name).join(', ') || '';
+  form.region.value = getUserRegion();
 }
 
 document.querySelector("#editProfileForm")?.addEventListener("submit", async (e) => {
@@ -795,6 +817,7 @@ document.querySelector("#editProfileForm")?.addEventListener("submit", async (e)
   const fd = new FormData(e.currentTarget);
   const statusEl = document.querySelector("#editProfileStatus");
   try {
+    const region = setUserRegion(fd.get("region") || "");
     currentUser = await api("/api/users/me", {
       method: "PATCH",
       body: JSON.stringify({
@@ -804,6 +827,14 @@ document.querySelector("#editProfileForm")?.addEventListener("submit", async (e)
       }),
     });
     updateProfile();
+    const locationSearch = document.querySelector("#locationSearch");
+    if (locationSearch) {
+      locationSearch.value = region;
+    }
+    await loadMeetings();
+    if (document.querySelector("#meetings")?.classList.contains("active")) {
+      await loadMeetingPage();
+    }
     statusEl.textContent = "저장되었습니다.";
   } catch (err) {
     statusEl.textContent = err.message;
@@ -1009,6 +1040,13 @@ document.querySelector("#refreshApplications")?.addEventListener("click", loadAp
 meetingSearch?.addEventListener("input", loadMeetingPage);
 document.querySelector("#locationSearch")?.addEventListener("input", loadMeetingPage);
 
+calendarPrev?.addEventListener("click", () => {
+  // 현재는 날짜 기준 고정 캘린더이므로 변화 없음
+});
+calendarNext?.addEventListener("click", () => {
+  // 현재는 날짜 기준 고정 캘린더이므로 변화 없음
+});
+
 navButtons.forEach((button) => {
   if (button.dataset.view === "home") {
     button.addEventListener("click", () => {
@@ -1129,6 +1167,8 @@ document.querySelector("#chatForm").addEventListener("submit", (event) => {
 function updateProfile() {
   document.querySelector("#profileName").textContent = currentUser?.name || "게스트";
   document.querySelector("#profileEmail").textContent = currentUser?.email || "로그인 후 추천을 받을 수 있어요.";
+  const region = getUserRegion();
+  document.querySelector("#profileRegion").textContent = region ? `내 지역: ${region}` : "지역 설정을 추가해 주세요.";
 }
 
 async function restoreSession() {
@@ -1150,5 +1190,6 @@ async function restoreSession() {
 }
 
 restoreSession();
+renderCalendarGrid();
 
 document.querySelector("#backButton").style.visibility = "hidden";
