@@ -6,7 +6,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>이음 | 취향 기반 모임 매칭</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260526-3" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260526-6" />
   </head>
   <body>
     <div id="app" class="phone">
@@ -121,7 +121,17 @@
               </label>
               <label>인원<input name="max_members" type="number" min="2" value="5" required /></label>
             </div>
-            <label>장소<input name="location" placeholder="공학관 301" required /></label>
+            <label>키워드<input name="keywords" placeholder="성수, 카페, 대화" /></label>
+            <div class="place-recommend-panel">
+              <div class="place-recommend-head">
+                <label>장소<input name="location" placeholder="공학관 301" required /></label>
+                <button id="recommendPlaceButton" class="secondary-button" type="button">장소 추천</button>
+              </div>
+              <div id="placeRecommendationList" class="place-recommend-list"></div>
+              <div id="placeMapPanel" class="place-map-panel">
+                <div class="map-empty">장소 추천을 누르면 지도에서 확인할 수 있습니다.</div>
+              </div>
+            </div>
             <button class="primary-button" type="submit">등록하기</button>
             <p id="meetingStatus" class="status-text"></p>
           </form>
@@ -238,6 +248,6 @@
         <button data-view="profile" class="nav-button">MY</button>
       </nav>
     </div>
-    <script src="/static/app.js?v=20260526-2"></script>
+    <script src="/static/app.js?v=20260526-6"></script>
   </body>
 </html>

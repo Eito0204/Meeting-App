@@ -91,9 +91,30 @@ cp .env.example .env
 pip install -r requirements.txt
 
 #3: 서버 실행
-uvicorn main:app --reload
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 브라우저에서 `http://127.0.0.1:8000`으로 접속하면 기본 프론트엔드를 확인할 수 있습니다.
 
 API 문서는 `http://127.0.0.1:8000/docs`에서 확인할 수 있습니다.
+
+## 팀원 접속 방법
+
+같은 Wi-Fi에 연결된 팀원이 접속하려면 서버를 실행한 컴퓨터의 내부 IP 주소를 사용합니다.
+
+```bash
+ipconfig getifaddr en0
+```
+
+예를 들어 IP가 `192.168.184.39`라면 팀원은 브라우저에서 아래 주소로 접속합니다.
+
+```text
+http://192.168.184.39:8000
+```
+
+접속이 안 되면 다음을 확인합니다.
+
+- 팀원 기기와 서버 컴퓨터가 같은 Wi-Fi에 연결되어 있는지 확인합니다.
+- macOS 방화벽이 켜져 있다면 Python 또는 uvicorn의 수신 연결을 허용합니다.
+- 학교/공공 Wi-Fi처럼 기기 간 통신을 막는 네트워크에서는 같은 Wi-Fi여도 접속이 안 될 수 있습니다.
+- 다른 네트워크에서도 접속해야 한다면 ngrok, Cloudflare Tunnel 같은 터널링 도구가 필요합니다.

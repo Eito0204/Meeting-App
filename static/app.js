@@ -20,6 +20,10 @@ const screenSubTitle = document.querySelector("#screenSubTitle");
 const meetingDetail = document.querySelector("#meetingDetail");
 const meetingSearch = document.querySelector("#meetingSearch");
 const applicationList = document.querySelector("#applicationList");
+const meetingForm = document.querySelector("#meetingForm");
+const recommendPlaceButton = document.querySelector("#recommendPlaceButton");
+const placeRecommendationList = document.querySelector("#placeRecommendationList");
+const placeMapPanel = document.querySelector("#placeMapPanel");
 const userRegionKey = "meeting_app_user_region";
 const calendarGrid = document.querySelector("#calendarGrid");
 const calendarMonthLabel = document.querySelector("#calendarMonthLabel");
@@ -63,6 +67,13 @@ let activeRoomId = 1;
 let currentUser = null;
 let viewHistory = [];
 let notifications = [];
+let kakaoMapConfigPromise = null;
+let kakaoMapSdkPromise = null;
+let placeMap = null;
+let placeMapMarkers = [];
+let placeMapInfoWindows = [];
+let placeMapPlaces = [];
+let embeddedMapMode = false;
 
 function setView(viewName) {
   const currentActive = document.querySelector(".view.active");
@@ -169,6 +180,243 @@ function splitInterests(value) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function embeddedMapUrl(place) {
+  const lon = Number(place.longitude);
+  const lat = Number(place.latitude);
+  const bbox = [lon - 0.006, lat - 0.004, lon + 0.006, lat + 0.004].join(",");
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${encodeURIComponent(`${lat},${lon}`)}`;
+}
+
+async function loadKakaoMapConfig() {
+  if (!kakaoMapConfigPromise) {
+    kakaoMapConfigPromise = api("/api/place-recommendations/map-config").catch(() => ({ javascript_key: null }));
+  }
+  return kakaoMapConfigPromise;
+}
+
+async function loadKakaoMapSdk() {
+  const config = await loadKakaoMapConfig();
+  if (!config.javascript_key) return false;
+  if (window.kakao?.maps) return true;
+  if (!kakaoMapSdkPromise) {
+    kakaoMapSdkPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(config.javascript_key)}&autoload=false`;
+      script.async = true;
+      script.onload = () => window.kakao.maps.load(() => resolve(true));
+      script.onerror = () => reject(new Error("카카오맵 SDK를 불러오지 못했습니다."));
+      document.head.appendChild(script);
+    });
+  }
+  return kakaoMapSdkPromise;
+}
+
+function clearPlaceMap() {
+  placeMapMarkers.forEach((marker) => marker.setMap(null));
+  placeMapInfoWindows.forEach((infoWindow) => infoWindow.close());
+  placeMapMarkers = [];
+  placeMapInfoWindows = [];
+}
+
+function renderEmbeddedPlaceMap(places, activeIndex = 0) {
+  if (!places.length) return "";
+  const activePlace = places[activeIndex] || places[0];
+  const tabs = places
+    .map(
+      (place, index) => `
+        <button type="button" class="${index === activeIndex ? "active" : ""}" data-embedded-map-index="${index}">
+          ${place.place_name}
+        </button>
+      `,
+    )
+    .join("");
+
+  return `
+    <div class="embedded-map-shell">
+      <iframe
+        title="${activePlace.place_name} 지도"
+        src="${embeddedMapUrl(activePlace)}"
+        loading="lazy"
+        referrerpolicy="no-referrer-when-downgrade"
+      ></iframe>
+      <div class="embedded-map-caption">
+        <strong>${activePlace.place_name}</strong>
+        <span>${activePlace.address}</span>
+      </div>
+      <div class="embedded-map-tabs">${tabs}</div>
+    </div>
+  `;
+}
+
+function bindEmbeddedMapButtons() {
+  placeMapPanel?.querySelectorAll("[data-embedded-map-index]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const index = Number(button.dataset.embeddedMapIndex);
+      focusEmbeddedPlace(index);
+    });
+  });
+}
+
+function focusEmbeddedPlace(index = 0) {
+  if (!placeMapPanel || !embeddedMapMode || !placeMapPlaces.length) return;
+  placeMapPanel.innerHTML = renderEmbeddedPlaceMap(placeMapPlaces, index);
+  bindEmbeddedMapButtons();
+}
+
+function focusPlaceOnMap(place, index = 0) {
+  if (embeddedMapMode) {
+    focusEmbeddedPlace(index);
+    return;
+  }
+  if (!placeMap || !window.kakao?.maps) return;
+  const position = new window.kakao.maps.LatLng(place.latitude, place.longitude);
+  placeMap.panTo(position);
+  placeMapInfoWindows.forEach((infoWindow) => infoWindow.close());
+  placeMapInfoWindows[index]?.open(placeMap, placeMapMarkers[index]);
+}
+
+async function renderPlaceMap(places) {
+  if (!placeMapPanel) return;
+  placeMapPanel.innerHTML = "";
+  placeMap = null;
+  placeMapPlaces = places;
+  embeddedMapMode = false;
+  clearPlaceMap();
+
+  if (!places.length) return;
+
+  try {
+    const hasSdk = await loadKakaoMapSdk();
+    if (!hasSdk) {
+      embeddedMapMode = true;
+      placeMapPanel.innerHTML = renderEmbeddedPlaceMap(places, 0);
+      bindEmbeddedMapButtons();
+      return;
+    }
+
+    placeMapPanel.innerHTML = '<div id="placeMap" class="place-map" aria-label="추천 장소 지도"></div>';
+    const bounds = new window.kakao.maps.LatLngBounds();
+    placeMap = new window.kakao.maps.Map(document.querySelector("#placeMap"), {
+      center: new window.kakao.maps.LatLng(places[0].latitude, places[0].longitude),
+      level: 5,
+    });
+
+    places.forEach((place, index) => {
+      const position = new window.kakao.maps.LatLng(place.latitude, place.longitude);
+      const marker = new window.kakao.maps.Marker({ position });
+      const infoWindow = new window.kakao.maps.InfoWindow({
+        content: `<div class="map-info"><strong>${place.place_name}</strong><span>${place.address}</span></div>`,
+      });
+      marker.setMap(placeMap);
+      window.kakao.maps.event.addListener(marker, "click", () => focusPlaceOnMap(place, index));
+      placeMapMarkers.push(marker);
+      placeMapInfoWindows.push(infoWindow);
+      bounds.extend(position);
+    });
+
+    if (places.length > 1) {
+      placeMap.setBounds(bounds);
+    }
+    window.setTimeout(() => window.kakao.maps.event.trigger(placeMap, "resize"), 0);
+    focusPlaceOnMap(places[0], 0);
+  } catch {
+    embeddedMapMode = true;
+    placeMapPanel.innerHTML = renderEmbeddedPlaceMap(places, 0);
+    bindEmbeddedMapButtons();
+  }
+}
+
+function renderPlaceRecommendations(places) {
+  if (!placeRecommendationList) return;
+  placeRecommendationList.innerHTML = places.length
+    ? places
+        .map(
+          (place, index) => `
+            <article class="place-recommend-card" data-place-index="${index}" role="button" tabindex="0">
+              <strong>${place.place_name}</strong>
+              <span>${place.address}</span>
+              <small>${place.description}</small>
+              <div class="place-card-footer">
+                <em>${place.latitude.toFixed(6)}, ${place.longitude.toFixed(6)}</em>
+                <span>지도에서 보기</span>
+              </div>
+            </article>
+          `,
+        )
+        .join("")
+    : "";
+
+  placeRecommendationList.querySelectorAll("[data-place-index]").forEach((button) => {
+    const selectPlace = () => {
+      const place = places[Number(button.dataset.placeIndex)];
+      const index = Number(button.dataset.placeIndex);
+      if (!place || !meetingForm) return;
+      const locationInput = meetingForm.elements.location;
+      locationInput.value = `${place.place_name} (${place.address})`;
+      locationInput.dataset.latitude = String(place.latitude);
+      locationInput.dataset.longitude = String(place.longitude);
+      placeRecommendationList.querySelectorAll(".place-recommend-card").forEach((card) => {
+        card.classList.toggle("selected", card === button);
+      });
+      focusPlaceOnMap(place, index);
+    };
+    button.addEventListener("click", (event) => {
+      selectPlace();
+    });
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      selectPlace();
+    });
+  });
+}
+
+async function loadPlaceRecommendations() {
+  if (!meetingForm || !placeRecommendationList || !recommendPlaceButton) return;
+  const formData = new FormData(meetingForm);
+  const status = document.querySelector("#meetingStatus");
+  const title = String(formData.get("title") || "").trim();
+  const description = String(formData.get("description") || "").trim();
+  const category = String(formData.get("category") || "").trim();
+  const keywords = splitInterests(formData.get("keywords") || "");
+
+  if (title.length < 2 || description.length < 5 || !category) {
+    status.textContent = "모임명, 소개, 카테고리를 먼저 입력해 주세요.";
+    return;
+  }
+
+  recommendPlaceButton.disabled = true;
+  recommendPlaceButton.textContent = "추천 중";
+  status.textContent = "";
+  placeRecommendationList.innerHTML = '<div class="empty-panel">장소를 찾는 중입니다.</div>';
+  if (placeMapPanel) placeMapPanel.innerHTML = '<div class="map-empty">지도 정보를 준비하는 중입니다.</div>';
+
+  try {
+    const places = await api("/api/place-recommendations", {
+      method: "POST",
+      body: JSON.stringify({
+        title,
+        category,
+        description,
+        keywords,
+        limit: 3,
+      }),
+    });
+    renderPlaceRecommendations(places);
+    await renderPlaceMap(places);
+    if (!places.length) {
+      placeRecommendationList.innerHTML = '<div class="empty-panel">추천할 장소가 없습니다.</div>';
+    }
+  } catch (error) {
+    placeRecommendationList.innerHTML = "";
+    if (placeMapPanel) placeMapPanel.innerHTML = '<div class="map-empty">장소 추천을 누르면 지도에서 확인할 수 있습니다.</div>';
+    status.textContent = error.message;
+  } finally {
+    recommendPlaceButton.disabled = false;
+    recommendPlaceButton.textContent = "장소 추천";
+  }
 }
 
 function formatDate(value) {
@@ -1114,6 +1362,8 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
     status.textContent = error.message;
   }
 });
+
+recommendPlaceButton?.addEventListener("click", loadPlaceRecommendations);
 
 document.querySelector("#meetingForm").addEventListener("submit", async (event) => {
   event.preventDefault();

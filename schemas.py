@@ -63,6 +63,26 @@ class MeetingCreate(BaseModel):
     end_at: datetime | None = None
 
 
+class PlaceRecommendationRequest(BaseModel):
+    title: str = Field(min_length=2, max_length=120)
+    category: str = Field(min_length=2, max_length=50)
+    description: str = Field(min_length=5)
+    keywords: list[str] = Field(default_factory=list, max_length=12)
+    limit: int = Field(default=3, ge=1, le=5)
+
+
+class PlaceRecommendationOut(BaseModel):
+    place_name: str
+    address: str
+    latitude: float
+    longitude: float
+    description: str
+
+
+class KakaoMapConfigOut(BaseModel):
+    javascript_key: str | None = None
+
+
 class MeetingScheduleCreate(BaseModel):
     location: str = Field(min_length=2, max_length=120)
     scheduled_at: datetime

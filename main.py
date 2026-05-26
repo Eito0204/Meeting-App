@@ -12,6 +12,7 @@ from auth import create_access_token, get_current_user, get_user_from_token, has
 from database import AsyncSessionLocal, get_db, init_db
 from gemini_recommendations import recommend_meetings_with_gemini
 from models import BoardPost, ChatMessage, Interest, Meeting, MeetingApplication, MeetingSchedule, MeetingScheduleParticipant, User
+from place_recommendations import router as place_recommendations_router
 from schemas import (
     ApplicationCreate,
     ApplicationDecision,
@@ -46,6 +47,7 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.include_router(place_recommendations_router)
 
 
 class ConnectionManager:
