@@ -226,7 +226,8 @@ function renderEmbeddedPlaceMap(places, activeIndex = 0) {
   const tabs = places
     .map(
       (place, index) => `
-        <button type="button" class="${index === activeIndex ? "active" : ""}" data-embedded-map-index="${index}">
+        <button type="button" class="place-map-tab ${index === activeIndex ? "active" : ""}" data-embedded-map-index="${index}">
+          <span class="place-map-tab-num">${index + 1}</span>
           ${place.place_name}
         </button>
       `,
@@ -235,17 +236,22 @@ function renderEmbeddedPlaceMap(places, activeIndex = 0) {
 
   return `
     <div class="embedded-map-shell">
-      <iframe
-        title="${activePlace.place_name} 지도"
-        src="${embeddedMapUrl(activePlace)}"
-        loading="lazy"
-        referrerpolicy="no-referrer-when-downgrade"
-      ></iframe>
-      <div class="embedded-map-caption">
-        <strong>${activePlace.place_name}</strong>
-        <span>${activePlace.address}</span>
-      </div>
       <div class="embedded-map-tabs">${tabs}</div>
+      <div class="embedded-map-frame-wrap">
+        <iframe
+          title="${activePlace.place_name} 지도"
+          src="${embeddedMapUrl(activePlace)}"
+          loading="lazy"
+          referrerpolicy="no-referrer-when-downgrade"
+        ></iframe>
+      </div>
+      <div class="embedded-map-caption">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 5.25-7 13-7 13S5 14.25 5 9a7 7 0 0 1 7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
+        <div>
+          <strong>${activePlace.place_name}</strong>
+          <span>${activePlace.address}</span>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -273,6 +279,7 @@ function focusPlaceOnMap(place, index = 0) {
   if (!placeMap || !window.kakao?.maps) return;
   const position = new window.kakao.maps.LatLng(place.latitude, place.longitude);
   placeMap.panTo(position);
+  placeMap.setLevel(4);
   placeMapInfoWindows.forEach((infoWindow) => infoWindow.close());
   placeMapInfoWindows[index]?.open(placeMap, placeMapMarkers[index]);
 }
@@ -296,31 +303,79 @@ async function renderPlaceMap(places) {
       return;
     }
 
-    placeMapPanel.innerHTML = '<div id="placeMap" class="place-map" aria-label="추천 장소 지도"></div>';
+    placeMapPanel.innerHTML = `
+      <div class="place-map-wrap">
+        <div id="placeMap" class="place-map" aria-label="추천 장소 지도"></div>
+        <div class="place-map-overlay-tabs" id="placeMapTabs"></div>
+      </div>
+    `;
     const bounds = new window.kakao.maps.LatLngBounds();
     placeMap = new window.kakao.maps.Map(document.querySelector("#placeMap"), {
       center: new window.kakao.maps.LatLng(places[0].latitude, places[0].longitude),
-      level: 5,
+      level: 4,
     });
+
+    const tabsEl = document.querySelector("#placeMapTabs");
+    if (tabsEl) {
+      tabsEl.innerHTML = places.map((place, index) => `
+        <button type="button" class="place-map-overlay-tab ${index === 0 ? "active" : ""}" data-map-tab-index="${index}">
+          <span class="place-map-tab-num">${index + 1}</span>
+          ${place.place_name}
+        </button>
+      `).join("");
+      tabsEl.querySelectorAll("[data-map-tab-index]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const idx = Number(btn.dataset.mapTabIndex);
+          tabsEl.querySelectorAll("[data-map-tab-index]").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          const card = placeRecommendationList?.querySelector(`[data-place-index="${idx}"]`);
+          placeRecommendationList?.querySelectorAll(".place-recommend-card").forEach((c) => c.classList.remove("selected"));
+          if (card) {
+            card.classList.add("selected");
+            card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          }
+          focusPlaceOnMap(places[idx], idx);
+        });
+      });
+    }
 
     places.forEach((place, index) => {
       const position = new window.kakao.maps.LatLng(place.latitude, place.longitude);
-      const marker = new window.kakao.maps.Marker({ position });
+      const markerImage = new window.kakao.maps.MarkerImage(
+        `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 36 44"><path d="M18 0C8.06 0 0 8.06 0 18c0 12.42 18 26 18 26S36 30.42 36 18C36 8.06 27.94 0 18 0z" fill="#6366f1"/><circle cx="18" cy="18" r="9" fill="white"/><text x="18" y="23" text-anchor="middle" font-size="13" font-weight="900" fill="#6366f1" font-family="-apple-system,sans-serif">${index + 1}</text></svg>`)}`,
+        new window.kakao.maps.Size(36, 44),
+        { offset: new window.kakao.maps.Point(18, 44) }
+      );
+      const marker = new window.kakao.maps.Marker({ position, image: markerImage });
       const infoWindow = new window.kakao.maps.InfoWindow({
-        content: `<div class="map-info"><strong>${place.place_name}</strong><span>${place.address}</span></div>`,
+        content: `<div class="map-infowindow"><strong>${place.place_name}</strong><span>${place.address}</span></div>`,
+        removable: false,
       });
       marker.setMap(placeMap);
-      window.kakao.maps.event.addListener(marker, "click", () => focusPlaceOnMap(place, index));
+      window.kakao.maps.event.addListener(marker, "click", () => {
+        const tabsEl = document.querySelector("#placeMapTabs");
+        tabsEl?.querySelectorAll("[data-map-tab-index]").forEach((b) => b.classList.remove("active"));
+        tabsEl?.querySelector(`[data-map-tab-index="${index}"]`)?.classList.add("active");
+        const card = placeRecommendationList?.querySelector(`[data-place-index="${index}"]`);
+        placeRecommendationList?.querySelectorAll(".place-recommend-card").forEach((c) => c.classList.remove("selected"));
+        if (card) {
+          card.classList.add("selected");
+          card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+        focusPlaceOnMap(place, index);
+      });
       placeMapMarkers.push(marker);
       placeMapInfoWindows.push(infoWindow);
       bounds.extend(position);
     });
 
     if (places.length > 1) {
-      placeMap.setBounds(bounds);
+      placeMap.setBounds(bounds, 60, 60, 60, 60);
     }
-    window.setTimeout(() => window.kakao.maps.event.trigger(placeMap, "resize"), 0);
-    focusPlaceOnMap(places[0], 0);
+    window.setTimeout(() => {
+      window.kakao.maps.event.trigger(placeMap, "resize");
+      focusPlaceOnMap(places[0], 0);
+    }, 100);
   } catch {
     embeddedMapMode = true;
     placeMapPanel.innerHTML = renderEmbeddedPlaceMap(places, 0);
@@ -335,12 +390,18 @@ function renderPlaceRecommendations(places) {
         .map(
           (place, index) => `
             <article class="place-recommend-card" data-place-index="${index}" role="button" tabindex="0">
-              <strong>${place.place_name}</strong>
-              <span>${place.address}</span>
-              <small>${place.description}</small>
-              <div class="place-card-footer">
-                <em>${place.latitude.toFixed(6)}, ${place.longitude.toFixed(6)}</em>
-                <span>지도에서 보기</span>
+              <div class="place-card-badge">${index + 1}</div>
+              <div class="place-card-body">
+                <strong class="place-card-name">${place.place_name}</strong>
+                <span class="place-card-address">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 5.25-7 13-7 13S5 14.25 5 9a7 7 0 0 1 7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
+                  ${place.address}
+                </span>
+                <p class="place-card-desc">${place.description}</p>
+                ${(place.features && place.features.length) ? `<div class="place-card-features">${place.features.map((f) => `<span class="place-feature-chip">${f}</span>`).join("")}</div>` : ""}
+              </div>
+              <div class="place-card-arrow">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
               </div>
             </article>
           `,
@@ -360,7 +421,22 @@ function renderPlaceRecommendations(places) {
       placeRecommendationList.querySelectorAll(".place-recommend-card").forEach((card) => {
         card.classList.toggle("selected", card === button);
       });
+      const tabsEl = document.querySelector("#placeMapTabs");
+      tabsEl?.querySelectorAll("[data-map-tab-index]").forEach((b) => b.classList.remove("active"));
+      tabsEl?.querySelector(`[data-map-tab-index="${index}"]`)?.classList.add("active");
       focusPlaceOnMap(place, index);
+
+      // 지도 탭으로 자동 전환
+      const resultTabs = document.querySelectorAll(".place-result-tab[data-result-tab]");
+      resultTabs.forEach((t) => t.classList.remove("active"));
+      document.querySelector(".place-result-tab[data-result-tab='map']")?.classList.add("active");
+      const listPane = document.querySelector("#resultPaneList");
+      const mapPane = document.querySelector("#resultPaneMap");
+      if (listPane) listPane.hidden = true;
+      if (mapPane) mapPane.hidden = false;
+      if (placeMap) {
+        window.setTimeout(() => window.kakao?.maps?.event?.trigger(placeMap, "resize"), 50);
+      }
     };
     button.addEventListener("click", (event) => {
       selectPlace();
@@ -371,6 +447,16 @@ function renderPlaceRecommendations(places) {
       selectPlace();
     });
   });
+}
+
+function showPlaceResultSection() {
+  const section = document.querySelector(".place-result-section");
+  if (section) section.hidden = false;
+}
+
+function hidePlaceResultSection() {
+  const section = document.querySelector(".place-result-section");
+  if (section) section.hidden = true;
 }
 
 async function loadPlaceRecommendations() {
@@ -388,7 +474,7 @@ async function loadPlaceRecommendations() {
   }
 
   recommendPlaceButton.disabled = true;
-  recommendPlaceButton.textContent = "추천 중";
+  recommendPlaceButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1s linear infinite"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> 추천 중`;
   status.textContent = "";
   placeRecommendationList.innerHTML = '<div class="empty-panel">장소를 찾는 중입니다.</div>';
   if (placeMapPanel) placeMapPanel.innerHTML = '<div class="map-empty">지도 정보를 준비하는 중입니다.</div>';
@@ -401,21 +487,24 @@ async function loadPlaceRecommendations() {
         category,
         description,
         keywords,
-        limit: 3,
+        user_location: getUserRegion() || null,
+        limit: 10,
       }),
     });
     renderPlaceRecommendations(places);
     await renderPlaceMap(places);
+    if (places.length) showPlaceResultSection();
     if (!places.length) {
       placeRecommendationList.innerHTML = '<div class="empty-panel">추천할 장소가 없습니다.</div>';
     }
   } catch (error) {
     placeRecommendationList.innerHTML = "";
-    if (placeMapPanel) placeMapPanel.innerHTML = '<div class="map-empty">장소 추천을 누르면 지도에서 확인할 수 있습니다.</div>';
+    if (placeMapPanel) placeMapPanel.innerHTML = "";
+    hidePlaceResultSection();
     status.textContent = error.message;
   } finally {
     recommendPlaceButton.disabled = false;
-    recommendPlaceButton.textContent = "장소 추천";
+    recommendPlaceButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 5.25-7 13-7 13S5 14.25 5 9a7 7 0 0 1 7-7z"/><circle cx="12" cy="9" r="2.5"/></svg> 장소 추천`;
   }
 }
 
@@ -1364,6 +1453,26 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
 });
 
 recommendPlaceButton?.addEventListener("click", loadPlaceRecommendations);
+
+document.querySelectorAll(".place-result-tab[data-result-tab]").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".place-result-tab[data-result-tab]").forEach((t) => t.classList.remove("active"));
+    tab.classList.add("active");
+    const target = tab.dataset.resultTab;
+    const listPane = document.querySelector("#resultPaneList");
+    const mapPane = document.querySelector("#resultPaneMap");
+    if (target === "list") {
+      if (listPane) listPane.hidden = false;
+      if (mapPane) mapPane.hidden = true;
+    } else {
+      if (listPane) listPane.hidden = true;
+      if (mapPane) mapPane.hidden = false;
+      if (placeMap) {
+        window.setTimeout(() => window.kakao?.maps?.event?.trigger(placeMap, "resize"), 50);
+      }
+    }
+  });
+});
 
 document.querySelector("#meetingForm").addEventListener("submit", async (event) => {
   event.preventDefault();

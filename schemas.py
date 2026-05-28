@@ -68,15 +68,18 @@ class PlaceRecommendationRequest(BaseModel):
     category: str = Field(min_length=2, max_length=50)
     description: str = Field(min_length=5)
     keywords: list[str] = Field(default_factory=list, max_length=12)
-    limit: int = Field(default=3, ge=1, le=5)
+    user_location: str | None = Field(default=None, max_length=80)
+    limit: int = Field(default=10, ge=1, le=15)
 
 
 class PlaceRecommendationOut(BaseModel):
+    kakao_id: str | None = None
     place_name: str
     address: str
     latitude: float
     longitude: float
     description: str
+    features: list[str] = Field(default_factory=list)
 
 
 class KakaoMapConfigOut(BaseModel):
