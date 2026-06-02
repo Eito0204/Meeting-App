@@ -152,7 +152,9 @@ async def signup(payload: UserCreate, db: AsyncSession = Depends(get_db)) -> Use
         bio=payload.bio,
         hashed_password=hash_password(payload.password),
     )
-    user.interests = await get_or_create_interests(db, payload.interests)
+    # interests에서 name 필드 추출
+    interest_names = [i.get("name") for i in payload.interests if isinstance(i, dict) and i.get("name")]
+    user.interests = await get_or_create_interests(db, interest_names)
     db.add(user)
     await db.commit()
     await db.refresh(user, attribute_names=["interests"])
@@ -184,7 +186,9 @@ async def update_me(
     if payload.bio is not None:
         current_user.bio = payload.bio
     if payload.interests is not None:
-        current_user.interests = await get_or_create_interests(db, payload.interests)
+        # interests에서 name 필드 추출
+        interest_names = [i.get("name") for i in payload.interests if isinstance(i, dict) and i.get("name")]
+        current_user.interests = await get_or_create_interests(db, interest_names)
     await db.commit()
     await db.refresh(current_user, attribute_names=["interests"])
     return current_user
@@ -735,6 +739,14 @@ async def list_messages(meeting_id: int, db: AsyncSession = Depends(get_db)) -> 
         .options(selectinload(ChatMessage.sender).selectinload(User.interests))
     )
     return list(result.scalars().all())
+
+
+@app.post("/api/seed-daejeon", response_model=dict)
+async def seed_daejeon_data_endpoint(db: AsyncSession = Depends(get_db)) -> dict:
+    """대전광역시 서구 시연 데이터 생성 엔드포인트 (개발/시연용)"""
+    from seed_data import seed_daejeon_data
+    await seed_daejeon_data(db)
+    return {"message": "대전 서구 시연 데이터가 생성되었습니다."}
 
 
 @app.websocket("/ws/notify")

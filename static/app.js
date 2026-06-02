@@ -148,11 +148,51 @@ function setUserRegion(value) {
 }
 
 function meetingMatchesRegion(meeting) {
-  const region = getUserRegion();
-  if (!region) {
-    return true;
+  const userRegion = getUserRegion();
+  if (!userRegion) {
+    return true; // 지역 미설정시 모든 모임 표시
   }
-  return meeting.location?.toLowerCase().includes(region.toLowerCase());
+  
+  // 모임 위치에서 지역 추출 (예: "대전광역시 서구 둔산동 카페" → "대전 서구")
+  const meetingLocation = meeting.location || "";
+  
+  // 사용자 지역이 모임 위치에 포함되는지 확인
+  // 예: 사용자 "대전 서구"가 모임 "대전광역시 서구 둔산동"에 포함되는지
+  const userParts = userRegion.split(" ");
+  const userProvince = userParts[0]; // "대전"
+  const userCity = userParts.slice(1).join(" "); // "서구"
+  
+  // 모임 위치에 도/시가 모두 포함되는지 확인
+  const locationLower = meetingLocation.toLowerCase();
+  const provinceMatch = locationLower.includes(userProvince.toLowerCase()) ||
+                        locationLower.includes(getFullProvinceName(userProvince).toLowerCase());
+  const cityMatch = userCity ? locationLower.includes(userCity.toLowerCase()) : true;
+  
+  return provinceMatch && cityMatch;
+}
+
+// 짧은 지역명을 전체 명칭으로 변환
+function getFullProvinceName(shortName) {
+  const provinceMap = {
+    "서울": "서울특별시",
+    "부산": "부산광역시",
+    "대구": "대구광역시",
+    "인천": "인천광역시",
+    "광주": "광주광역시",
+    "대전": "대전광역시",
+    "울산": "울산광역시",
+    "세종": "세종특별자치시",
+    "경기": "경기도",
+    "강원": "강원특별자치도",
+    "충북": "충청북도",
+    "충남": "충청남도",
+    "전북": "전북특별자치도",
+    "전남": "전라남도",
+    "경북": "경상북도",
+    "경남": "경상남도",
+    "제주": "제주특별자치도",
+  };
+  return provinceMap[shortName] || shortName;
 }
 
 function filterMeetingsByRegion(meetings) {
@@ -170,7 +210,17 @@ async function api(path, options = {}) {
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(data?.detail || `HTTP ${response.status}`);
+    // 검증 오류 처리 (FastAPI는 배열로 반환)
+    if (Array.isArray(data?.detail)) {
+      const messages = data.detail.map(err => {
+        if (typeof err === 'string') return err;
+        if (err.msg) return err.msg;
+        if (err.message) return err.message;
+        return JSON.stringify(err);
+      });
+      throw new Error(messages.join(', '));
+    }
+    throw new Error(data?.detail || data?.message || `HTTP ${response.status}`);
   }
   return data;
 }
@@ -272,10 +322,6 @@ function focusEmbeddedPlace(index = 0) {
 }
 
 function focusPlaceOnMap(place, index = 0) {
-  if (embeddedMapMode) {
-    focusEmbeddedPlace(index);
-    return;
-  }
   if (!placeMap || !window.kakao?.maps) return;
   const position = new window.kakao.maps.LatLng(place.latitude, place.longitude);
   placeMap.panTo(position);
@@ -295,11 +341,13 @@ async function renderPlaceMap(places) {
   if (!places.length) return;
 
   try {
-    const hasSdk = await loadKakaoMapSdk();
+    // 카카오맵 SDK 로딩 (타임아웃 5초)
+    const hasSdk = await Promise.race([
+      loadKakaoMapSdk(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("카카오맵 SDK 로딩 시간 초과")), 5000))
+    ]);
     if (!hasSdk) {
-      embeddedMapMode = true;
-      placeMapPanel.innerHTML = renderEmbeddedPlaceMap(places, 0);
-      bindEmbeddedMapButtons();
+      placeMapPanel.innerHTML = '<div class="map-empty" style="padding:40px;text-align:center;color:var(--sub);">카카오맵 API 키가 설정되지 않았습니다.<br>.env 파일에 KAKAO_JAVASCRIPT_KEY를 설정해주세요.</div>';
       return;
     }
 
@@ -376,10 +424,8 @@ async function renderPlaceMap(places) {
       window.kakao.maps.event.trigger(placeMap, "resize");
       focusPlaceOnMap(places[0], 0);
     }, 100);
-  } catch {
-    embeddedMapMode = true;
-    placeMapPanel.innerHTML = renderEmbeddedPlaceMap(places, 0);
-    bindEmbeddedMapButtons();
+  } catch (err) {
+    placeMapPanel.innerHTML = `<div class="map-empty" style="padding:40px;text-align:center;color:var(--sub);">카카오맵을 불러오지 못했습니다.<br>${err.message}</div>`;
   }
 }
 
@@ -488,6 +534,7 @@ async function loadPlaceRecommendations() {
         description,
         keywords,
         user_location: getUserRegion() || null,
+        user_interests: currentUser?.interests?.map(i => i.name) || [],
         limit: 10,
       }),
     });
@@ -1140,13 +1187,116 @@ async function loadMyApplications() {
   }
 }
 
+// 도/시 데이터
+const KOREA_REGIONS = {
+  "서울": ["강남구", "강동구", "강북구", "강서구", "관악구", "광진구", "구로구", "금천구", "노원구", "도봉구", "동대문구", "동작구", "마포구", "서대문구", "서초구", "성동구", "성북구", "송파구", "양천구", "영등포구", "용산구", "은평구", "종로구", "중구", "중랑구"],
+  "부산": ["강서구", "금정구", "기장군", "남구", "동구", "동래구", "부산진구", "북구", "사상구", "사하구", "서구", "수영구", "연제구", "영도구", "중구", "해운대구"],
+  "대구": ["군위군", "남구", "달서구", "달성군", "동구", "북구", "서구", "수성구", "중구"],
+  "인천": ["강화군", "계양구", "남동구", "동구", "미추홀구", "부개구", "서구", "연수구", "옹진군", "중구"],
+  "광주": ["광산구", "남구", "동구", "북구", "서구"],
+  "대전": ["대덕구", "동구", "서구", "유성구", "중구"],
+  "울산": ["남구", "동구", "북구", "울주군", "중구"],
+  "세종": ["세종시"],
+  "경기": ["수원시", "성남시", "고양시", "용인시", "부천시", "안산시", "안양시", "남양주시", "화성시", "평택시", "의정부시", "시흥시", "파주시", "김포시", "광주시", "광명시", "군포시", "하남시", "오산시", "양주시", "이천시", "구리시", "안성시", "포천시", "의왕시", "양평군", "여주시", "동두천시", "과천시", "가평군", "연천군"],
+  "강원": ["춘천시", "원주시", "강릉시", "동해시", "태백시", "속초시", "삼척시", "홍천군", "횡성군", "영월군", "평창군", "정선군", "철원군", "화천군", "양구군", "인제군", "고성군", "양양군"],
+  "충북": ["청주시", "충주시", "제천시", "보은군", "옥천군", "영동군", "증평군", "진천군", "괴산군", "음성군", "단양군"],
+  "충남": ["천안시", "공주시", "보령시", "아산시", "서산시", "논산시", "계룡시", "당진시", "금산군", "부여군", "서천군", "청양군", "홍성군", "예산군", "태안군"],
+  "전북": ["전주시", "군산시", "익산시", "정읍시", "남원시", "김제시", "완주군", "진안군", "무주군", "장수군", "임실군", "순창군", "고창군", "부안군"],
+  "전남": ["목포시", "여수시", "순천시", "나주시", "광양시", "담양군", "곡성군", "구례군", "고흥군", "보성군", "화순군", "장흥군", "강진군", "해남군", "영암군", "무안군", "함평군", "영광군", "장성군", "완도군", "진도군", "신안군"],
+  "경북": ["포항시", "경주시", "김천시", "안동시", "구미시", "영주시", "영천시", "상주시", "문경시", "경산시", "의성군", "청송군", "영양군", "영덕군", "청도군", "고령군", "성주군", "칠곡군", "예천군", "봉화군", "울진군", "울릉군"],
+  "경남": ["창원시", "진주시", "통영시", "사천시", "김해시", "밀양시", "거제시", "양산시", "의령군", "함안군", "창녕군", "고성군", "남해군", "하동군", "산청군", "함양군", "거창군", "합천군"],
+  "제주": ["제주시", "서귀포시"]
+};
+
+// 도/시 캐스케이드 선택 초기화
+function initRegionSelect() {
+  const provinceSelect = document.querySelector("#provinceSelect");
+  const citySelect = document.querySelector("#citySelect");
+  const regionInput = document.querySelector("#regionInput");
+
+  if (!provinceSelect || !citySelect) return;
+
+  provinceSelect.addEventListener("change", () => {
+    const province = provinceSelect.value;
+    citySelect.innerHTML = '<option value="">시/군/구 선택</option>';
+    regionInput.value = province;
+
+    if (province && KOREA_REGIONS[province]) {
+      citySelect.disabled = false;
+      KOREA_REGIONS[province].forEach(city => {
+        const option = document.createElement("option");
+        option.value = city;
+        option.textContent = city;
+        citySelect.appendChild(option);
+      });
+    } else {
+      citySelect.disabled = true;
+    }
+  });
+
+  citySelect.addEventListener("change", () => {
+    const province = provinceSelect.value;
+    const city = citySelect.value;
+    if (province && city) {
+      regionInput.value = `${province} ${city}`;
+    } else if (province) {
+      regionInput.value = province;
+    }
+  });
+}
+
+// 저장된 지역값으로 도/시 선택 복원
+function setRegionSelectValue(savedRegion) {
+  const provinceSelect = document.querySelector("#provinceSelect");
+  const citySelect = document.querySelector("#citySelect");
+  const regionInput = document.querySelector("#regionInput");
+
+  if (!provinceSelect || !savedRegion) return;
+
+  // 저장된 값에서 도와 시 추출 (예: "서울 강남구" 또는 "경기 수원시")
+  const parts = savedRegion.split(" ");
+  const province = parts[0];
+  const city = parts.slice(1).join(" ");
+
+  // 도 선택
+  provinceSelect.value = province;
+  regionInput.value = savedRegion;
+
+  if (province && KOREA_REGIONS[province]) {
+    // 시/군/구 옵션 생성
+    citySelect.innerHTML = '<option value="">시/군/구 선택</option>';
+    citySelect.disabled = false;
+    KOREA_REGIONS[province].forEach(cityName => {
+      const option = document.createElement("option");
+      option.value = cityName;
+      option.textContent = cityName;
+      citySelect.appendChild(option);
+    });
+    // 시 선택 (있으면)
+    if (city) {
+      citySelect.value = city;
+    }
+  }
+}
+
 async function loadEditProfile() {
   if (!currentUser) return;
   const form = document.querySelector("#editProfileForm");
   form.name.value = currentUser.name || '';
   form.bio.value = currentUser.bio || '';
-  form.interests.value = currentUser.interests?.map(i => i.name).join(', ') || '';
-  form.region.value = getUserRegion();
+  // 관심 분야 3개 드롭다운 설정
+  const interest1Select = document.querySelector("#interest1Select");
+  const interest2Select = document.querySelector("#interest2Select");
+  const interest3Select = document.querySelector("#interest3Select");
+  if (currentUser.interests && currentUser.interests.length > 0) {
+    const userInterests = currentUser.interests.map(i => i.name);
+    if (interest1Select) interest1Select.value = userInterests[0] || "";
+    if (interest2Select) interest2Select.value = userInterests[1] || "";
+    if (interest3Select) interest3Select.value = userInterests[2] || "";
+  }
+  // 도/시 캐스케이드 선택 초기화 및 값 설정
+  initRegionSelect();
+  setRegionSelectValue(getUserRegion());
 }
 
 document.querySelector("#editProfileForm")?.addEventListener("submit", async (e) => {
@@ -1155,12 +1305,16 @@ document.querySelector("#editProfileForm")?.addEventListener("submit", async (e)
   const statusEl = document.querySelector("#editProfileStatus");
   try {
     const region = setUserRegion(fd.get("region") || "");
+    // 3개 드롭다운에서 선택된 값들 가져오기 (중복 제거, 빈값 제거)
+    const selectedInterests = [fd.get("interest1"), fd.get("interest2"), fd.get("interest3")]
+      .filter((v, i, arr) => v && arr.indexOf(v) === i) // 빈값 제거 + 중복 제거
+      .map(name => ({ name }));
     currentUser = await api("/api/users/me", {
       method: "PATCH",
       body: JSON.stringify({
         name: fd.get("name"),
         bio: fd.get("bio"),
-        interests: splitInterests(fd.get("interests") || ""),
+        interests: selectedInterests,
       }),
     });
     updateProfile();
@@ -1394,9 +1548,14 @@ navButtons.forEach((button) => {
 
 document.querySelector("#signupForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const form = new FormData(event.currentTarget);
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
   const status = document.querySelector("#authStatus");
   try {
+    // 3개 드롭다운에서 선택된 값들 가져오기 (중복 제거, 빈값 제거)
+    const selectedInterests = [form.get("interest1"), form.get("interest2"), form.get("interest3")]
+      .filter((v, i, arr) => v && arr.indexOf(v) === i) // 빈값 제거 + 중복 제거
+      .map(name => ({ name }));
     await api("/api/auth/signup", {
       method: "POST",
       body: JSON.stringify({
@@ -1404,7 +1563,7 @@ document.querySelector("#signupForm").addEventListener("submit", async (event) =
         email: form.get("email"),
         password: form.get("password"),
         bio: form.get("bio"),
-        interests: splitInterests(form.get("interests") || ""),
+        interests: selectedInterests,
       }),
     });
     const data = await api("/api/auth/login", {
@@ -1418,7 +1577,7 @@ document.querySelector("#signupForm").addEventListener("submit", async (event) =
     currentUser = await api("/api/users/me");
     updateProfile();
     status.textContent = "회원가입과 로그인이 완료되었습니다.";
-    event.currentTarget.reset();
+    formElement.reset();
     await loadMeetings();
     await loadApplications();
     setView("home");
@@ -1441,12 +1600,9 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
     });
     localStorage.setItem(tokenKey, data.access_token);
     currentUser = await api("/api/users/me");
-    status.textContent = "로그인되었습니다.";
-    updateProfile();
-    await loadMeetings();
-    await loadApplications();
-    connectNotifySocket();
-    setView("home");
+    status.textContent = "로그인되었습니다. 홈 화면으로 이동합니다...";
+    // 홈 화면으로 새로고침
+    window.location.href = "/";
   } catch (error) {
     status.textContent = error.message;
   }
@@ -1474,6 +1630,72 @@ document.querySelectorAll(".place-result-tab[data-result-tab]").forEach((tab) =>
   });
 });
 
+// 모임 폼 지역 선택 초기화
+function initMeetingRegionSelect() {
+  const provinceSelect = document.querySelector("#meetingProvinceSelect");
+  const citySelect = document.querySelector("#meetingCitySelect");
+  const regionInput = document.querySelector("#meetingRegionInput");
+  
+  if (!provinceSelect || !citySelect) return;
+  
+  // 사용자 저장된 지역으로 기본값 설정
+  const savedRegion = getUserRegion();
+  if (savedRegion) {
+    const parts = savedRegion.split(" ");
+    if (parts.length >= 2) {
+      provinceSelect.value = parts[0];
+      // 시/군/구 옵션 생성
+      citySelect.innerHTML = '<option value="">시/군/구 선택</option>';
+      citySelect.disabled = false;
+      if (KOREA_REGIONS[parts[0]]) {
+        KOREA_REGIONS[parts[0]].forEach(city => {
+          const option = document.createElement("option");
+          option.value = city;
+          option.textContent = city;
+          citySelect.appendChild(option);
+        });
+        citySelect.value = parts.slice(1).join(" ");
+      }
+      regionInput.value = savedRegion;
+    }
+  }
+  
+  provinceSelect.addEventListener("change", () => {
+    const province = provinceSelect.value;
+    citySelect.innerHTML = '<option value="">시/군/구 선택</option>';
+    regionInput.value = province;
+    
+    if (province && KOREA_REGIONS[province]) {
+      citySelect.disabled = false;
+      KOREA_REGIONS[province].forEach(city => {
+        const option = document.createElement("option");
+        option.value = city;
+        option.textContent = city;
+        citySelect.appendChild(option);
+      });
+    } else {
+      citySelect.disabled = true;
+    }
+  });
+  
+  citySelect.addEventListener("change", () => {
+    const province = provinceSelect.value;
+    const city = citySelect.value;
+    if (province && city) {
+      regionInput.value = `${province} ${city}`;
+    } else if (province) {
+      regionInput.value = province;
+    }
+  });
+}
+
+// 모임 생성 뷰 열 때 지역 선택 초기화
+document.querySelectorAll('[data-view="create"]').forEach(btn => {
+  btn.addEventListener("click", () => {
+    initMeetingRegionSelect();
+  });
+});
+
 document.querySelector("#meetingForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
@@ -1489,6 +1711,14 @@ document.querySelector("#meetingForm").addEventListener("submit", async (event) 
     status.textContent = "카테고리를 선택해주세요.";
     return;
   }
+  
+  // 지역 확인
+  const region = formData.get("region");
+  if (!region) {
+    status.textContent = "지역을 선택해주세요.";
+    return;
+  }
+  
   try {
     await api("/api/meetings", {
       method: "POST",
@@ -1496,9 +1726,9 @@ document.querySelector("#meetingForm").addEventListener("submit", async (event) 
         title: formData.get("title"),
         description: formData.get("description"),
         category: category,
-        location: formData.get("location"),
+        location: `${region} ${formData.get("location")}`,
         max_members: Number(formData.get("max_members")),
-        start_at: new Date(formData.get("start_at")).toISOString(),
+        start_at: new Date().toISOString(), // 현재 시간으로 설정
       }),
     });
     status.textContent = "모임이 등록되었습니다.";

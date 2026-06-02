@@ -82,20 +82,25 @@ def _build_user_prompt(payload: PlaceRecommendationRequest) -> str:
 
 def _build_curation_prompt(payload: PlaceRecommendationRequest, kakao_places_data: list[dict]) -> str:
     keywords = ", ".join(k.strip() for k in payload.keywords if k.strip()) or "없음"
-    user_location = payload.user_location or "서울 전지역"
+    user_location = payload.user_location or "미설정"
+    user_interests = ", ".join(i.strip() for i in payload.user_interests if i.strip()) or "없음"
     kakao_json = json.dumps(kakao_places_data, ensure_ascii=False, indent=2)
     return f"""당신은 모임 장소 추천 전문가입니다.
 
 아래는 카카오맵 API로 검색된 실제 장소 목록입니다.
-이 중에서 사용자의 모임 종류에 가장 적합한 장소 {payload.limit}개를 선별하고 추천 이유를 작성해주세요.
+사용자의 지역과 관심사, 모임 종류를 종합적으로 고려하여 가장 적합한 장소 {payload.limit}개를 선별하고 추천 이유를 작성해주세요.
 
-입력값:
-- 모임 제목: {payload.title}
-- 모임 카테고리: {payload.category}
-- 모임 설명: {payload.description}
+사용자 프로필:
+- 선호 지역: {user_location}
+- 관심 분야: {user_interests}
+
+모임 정보:
+- 제목: {payload.title}
+- 카테고리: {payload.category}
+- 설명: {payload.description}
 - 키워드: {keywords}
-- 사용자 지역: {user_location}
-- 카카오맵 검색 결과:
+
+카카오맵 검색 결과:
 {kakao_json}
 
 다음 형식으로 JSON만 반환하세요 (다른 텍스트 없이):
@@ -330,15 +335,23 @@ def _build_search_queries(payload: PlaceRecommendationRequest) -> list[str]:
     region = (payload.user_location or "").strip()
     category = (payload.category or "").strip()
     hints = CATEGORY_QUERY_HINTS.get(category, [category or "모임공간"])
+    interests = [i.strip() for i in payload.user_interests if i.strip()][:2]  # 상위 2개 관심사
 
     queries: list[str] = []
+    # 지역 + 카테고리 기반 쿼리
     for hint in hints:
         if region:
             queries.append(f"{region} {hint}")
         else:
             queries.append(hint)
+    # 지역 + 관심사 기반 쿼리 (관심사가 있으면)
+    for interest in interests:
+        if region:
+            queries.append(f"{region} {interest}")
+        else:
+            queries.append(interest)
     # 키워드 기반 보조 쿼리
-    for kw in payload.keywords[:3]:
+    for kw in payload.keywords[:2]:
         kw = kw.strip()
         if not kw:
             continue

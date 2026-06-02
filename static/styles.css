@@ -1558,3 +1558,39 @@ textarea { min-height: 90px; resize: vertical; }
     box-shadow: 0 40px 80px rgba(0, 0, 0, 0.4);
   }
 }
+
+/* ============================================
+   지역 선택 (도/시 캐스케이드)
+   ============================================ */
+
+.region-select-group {
+  display: flex;
+  gap: 12px;
+}
+
+.region-select-group select {
+  flex: 1;
+}
+
+.region-select-group select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--soft);
+}
+
+/* ============================================
+   관심 분야 선택
+   ============================================ */
+
+label:has(#interest1Select),
+label:has(#interest2Select),
+label:has(#interest3Select) {
+  margin-bottom: 8px;
+}
+
+#interest2Select,
+#interest3Select,
+#signupInterest2Select,
+#signupInterest3Select {
+  color: var(--sub);
+}
