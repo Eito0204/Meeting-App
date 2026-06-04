@@ -83,16 +83,9 @@ cp .env.example .env
 
 ## 실행 방법
 
-```bash
-#1: 가상환경 활성화
-.venv\Scripts\activate
-
-#2: 패키지 설치
-pip install -r requirements.txt
-
-#3: 서버 실행
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
+1. 프로젝트 폴더로 이동
+2. npm install
+3. npm run dev
 
 브라우저에서 `http://127.0.0.1:8000`으로 접속하면 기본 프론트엔드를 확인할 수 있습니다.
 
