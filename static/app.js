@@ -20,6 +20,43 @@ const screenSubTitle = document.querySelector("#screenSubTitle");
 const meetingDetail = document.querySelector("#meetingDetail");
 const meetingSearch = document.querySelector("#meetingSearch");
 const applicationList = document.querySelector("#applicationList");
+const meetingForm = document.querySelector("#meetingForm");
+const recommendPlaceButton = document.querySelector("#recommendPlaceButton");
+const placeRecommendationList = document.querySelector("#placeRecommendationList");
+const placeMapPanel = document.querySelector("#placeMapPanel");
+const userRegionKey = "meeting_app_user_region";
+const calendarGrid = document.querySelector("#calendarGrid");
+const calendarMonthLabel = document.querySelector("#calendarMonthLabel");
+const calendarPrev = document.querySelector("#calendarPrev");
+const calendarNext = document.querySelector("#calendarNext");
+
+if (screenSubTitle) {
+  screenSubTitle.textContent = "";
+}
+if (document.querySelector(".home-card")) {
+  document.querySelector(".home-card").remove();
+}
+
+const header = document.querySelector(".app-header");
+const headerCenter = header?.querySelector("div");
+if (header) {
+  header.style.display = "flex";
+  header.style.alignItems = "center";
+  header.style.justifyContent = "space-between";
+  header.style.position = "relative";
+}
+if (headerCenter) {
+  headerCenter.style.position = "absolute";
+  headerCenter.style.left = "50%";
+  headerCenter.style.transform = "translateX(-50%)";
+  headerCenter.style.display = "flex";
+  headerCenter.style.flexDirection = "column";
+  headerCenter.style.alignItems = "center";
+  headerCenter.style.justifyContent = "center";
+}
+if (document.querySelector(".profile-dot")) {
+  document.querySelector(".profile-dot").remove();
+}
 
 let cachedMeetings = [];
 let cachedRecommendations = [];
@@ -30,6 +67,13 @@ let activeRoomId = 1;
 let currentUser = null;
 let viewHistory = [];
 let notifications = [];
+let kakaoMapConfigPromise = null;
+let kakaoMapSdkPromise = null;
+let placeMap = null;
+let placeMapMarkers = [];
+let placeMapInfoWindows = [];
+let placeMapPlaces = [];
+let embeddedMapMode = false;
 
 function setView(viewName) {
   const currentActive = document.querySelector(".view.active");
@@ -39,15 +83,18 @@ function setView(viewName) {
   views.forEach((view) => view.classList.toggle("active", view.id === viewName));
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === viewName));
   const currentView = document.querySelector(`#${viewName}`);
-  if (currentView) {
-    screenTitle.textContent = currentView.dataset.title || "이음";
-    screenSubTitle.textContent = currentView.dataset.subtitle || "Team 알잘딱깔센";
+  const currentTitle = document.querySelector("#screenTitle");
+  const currentSubTitle = document.querySelector("#screenSubTitle");
+  if (currentView && currentTitle && currentSubTitle) {
+    currentTitle.textContent = currentView.dataset.title || "이음";
+    currentSubTitle.textContent = viewName === "home" ? "" : (currentView.dataset.subtitle ?? "");
   }
   const backButton = document.querySelector("#backButton");
   if (backButton) backButton.style.visibility = viewHistory.length > 0 ? "visible" : "hidden";
 
   if (viewName === "notifications") renderNotifications();
   if (viewName === "meetings") loadMeetingPage();
+  if (viewName === "recommend") loadRecommendationView();
   if (viewName === "mymeetings") loadMyMeetingView();
   if (viewName === "calendar") loadCalendar();
   if (viewName === "chat") loadChatView();
@@ -63,9 +110,11 @@ document.querySelector("#backButton").addEventListener("click", () => {
   views.forEach((view) => view.classList.toggle("active", view.id === prev));
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === prev));
   const prevView = document.querySelector(`#${prev}`);
-  if (prevView) {
-    screenTitle.textContent = prevView.dataset.title || "이음";
-    screenSubTitle.textContent = prevView.dataset.subtitle || "Team 알잘딱깔센";
+  const currentTitle = document.querySelector("#screenTitle");
+  const currentSubTitle = document.querySelector("#screenSubTitle");
+  if (prevView && currentTitle && currentSubTitle) {
+    currentTitle.textContent = prevView.dataset.title || "이음";
+    currentSubTitle.textContent = prev === "home" ? "" : (prevView.dataset.subtitle ?? "");
   }
   const backButton = document.querySelector("#backButton");
   if (backButton) backButton.style.visibility = viewHistory.length > 0 ? "visible" : "hidden";
@@ -80,6 +129,76 @@ function authToken() {
   return localStorage.getItem(tokenKey);
 }
 
+function normalizeRegion(value) {
+  return (value || "").trim().replace(/\s+/g, " ");
+}
+
+function getUserRegion() {
+  return normalizeRegion(localStorage.getItem(userRegionKey));
+}
+
+function setUserRegion(value) {
+  const region = normalizeRegion(value);
+  if (!region) {
+    localStorage.removeItem(userRegionKey);
+    return "";
+  }
+  localStorage.setItem(userRegionKey, region);
+  return region;
+}
+
+function meetingMatchesRegion(meeting) {
+  const userRegion = getUserRegion();
+  if (!userRegion) {
+    return true; // 지역 미설정시 모든 모임 표시
+  }
+  
+  // 모임 위치에서 지역 추출 (예: "대전광역시 서구 둔산동 카페" → "대전 서구")
+  const meetingLocation = meeting.location || "";
+  
+  // 사용자 지역이 모임 위치에 포함되는지 확인
+  // 예: 사용자 "대전 서구"가 모임 "대전광역시 서구 둔산동"에 포함되는지
+  const userParts = userRegion.split(" ");
+  const userProvince = userParts[0]; // "대전"
+  const userCity = userParts.slice(1).join(" "); // "서구"
+  
+  // 모임 위치에 도/시가 모두 포함되는지 확인
+  const locationLower = meetingLocation.toLowerCase();
+  const provinceMatch = locationLower.includes(userProvince.toLowerCase()) ||
+                        locationLower.includes(getFullProvinceName(userProvince).toLowerCase());
+  const cityMatch = userCity ? locationLower.includes(userCity.toLowerCase()) : true;
+  
+  return provinceMatch && cityMatch;
+}
+
+// 짧은 지역명을 전체 명칭으로 변환
+function getFullProvinceName(shortName) {
+  const provinceMap = {
+    "서울": "서울특별시",
+    "부산": "부산광역시",
+    "대구": "대구광역시",
+    "인천": "인천광역시",
+    "광주": "광주광역시",
+    "대전": "대전광역시",
+    "울산": "울산광역시",
+    "세종": "세종특별자치시",
+    "경기": "경기도",
+    "강원": "강원특별자치도",
+    "충북": "충청북도",
+    "충남": "충청남도",
+    "전북": "전북특별자치도",
+    "전남": "전라남도",
+    "경북": "경상북도",
+    "경남": "경상남도",
+    "제주": "제주특별자치도",
+  };
+  return provinceMap[shortName] || shortName;
+}
+
+function filterMeetingsByRegion(meetings) {
+  return (meetings || []).filter(meetingMatchesRegion);
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -91,7 +210,17 @@ async function api(path, options = {}) {
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(data?.detail || `HTTP ${response.status}`);
+    // 검증 오류 처리 (FastAPI는 배열로 반환)
+    if (Array.isArray(data?.detail)) {
+      const messages = data.detail.map(err => {
+        if (typeof err === 'string') return err;
+        if (err.msg) return err.msg;
+        if (err.message) return err.message;
+        return JSON.stringify(err);
+      });
+      throw new Error(messages.join(', '));
+    }
+    throw new Error(data?.detail || data?.message || `HTTP ${response.status}`);
   }
   return data;
 }
@@ -101,6 +230,329 @@ function splitInterests(value) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function embeddedMapUrl(place) {
+  const lon = Number(place.longitude);
+  const lat = Number(place.latitude);
+  const bbox = [lon - 0.006, lat - 0.004, lon + 0.006, lat + 0.004].join(",");
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${encodeURIComponent(`${lat},${lon}`)}`;
+}
+
+async function loadKakaoMapConfig() {
+  if (!kakaoMapConfigPromise) {
+    kakaoMapConfigPromise = api("/api/place-recommendations/map-config").catch(() => ({ javascript_key: null }));
+  }
+  return kakaoMapConfigPromise;
+}
+
+async function loadKakaoMapSdk() {
+  const config = await loadKakaoMapConfig();
+  if (!config.javascript_key) return false;
+  if (window.kakao?.maps) return true;
+  if (!kakaoMapSdkPromise) {
+    kakaoMapSdkPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(config.javascript_key)}&autoload=false`;
+      script.async = true;
+      script.onload = () => window.kakao.maps.load(() => resolve(true));
+      script.onerror = () => reject(new Error("카카오맵 SDK를 불러오지 못했습니다."));
+      document.head.appendChild(script);
+    });
+  }
+  return kakaoMapSdkPromise;
+}
+
+function clearPlaceMap() {
+  placeMapMarkers.forEach((marker) => marker.setMap(null));
+  placeMapInfoWindows.forEach((infoWindow) => infoWindow.close());
+  placeMapMarkers = [];
+  placeMapInfoWindows = [];
+}
+
+function renderEmbeddedPlaceMap(places, activeIndex = 0) {
+  if (!places.length) return "";
+  const activePlace = places[activeIndex] || places[0];
+  const tabs = places
+    .map(
+      (place, index) => `
+        <button type="button" class="place-map-tab ${index === activeIndex ? "active" : ""}" data-embedded-map-index="${index}">
+          <span class="place-map-tab-num">${index + 1}</span>
+          ${place.place_name}
+        </button>
+      `,
+    )
+    .join("");
+
+  return `
+    <div class="embedded-map-shell">
+      <div class="embedded-map-tabs">${tabs}</div>
+      <div class="embedded-map-frame-wrap">
+        <iframe
+          title="${activePlace.place_name} 지도"
+          src="${embeddedMapUrl(activePlace)}"
+          loading="lazy"
+          referrerpolicy="no-referrer-when-downgrade"
+        ></iframe>
+      </div>
+      <div class="embedded-map-caption">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 5.25-7 13-7 13S5 14.25 5 9a7 7 0 0 1 7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
+        <div>
+          <strong>${activePlace.place_name}</strong>
+          <span>${activePlace.address}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bindEmbeddedMapButtons() {
+  placeMapPanel?.querySelectorAll("[data-embedded-map-index]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const index = Number(button.dataset.embeddedMapIndex);
+      focusEmbeddedPlace(index);
+    });
+  });
+}
+
+function focusEmbeddedPlace(index = 0) {
+  if (!placeMapPanel || !embeddedMapMode || !placeMapPlaces.length) return;
+  placeMapPanel.innerHTML = renderEmbeddedPlaceMap(placeMapPlaces, index);
+  bindEmbeddedMapButtons();
+}
+
+function focusPlaceOnMap(place, index = 0) {
+  if (!placeMap || !window.kakao?.maps) return;
+  const position = new window.kakao.maps.LatLng(place.latitude, place.longitude);
+  placeMap.panTo(position);
+  placeMap.setLevel(4);
+  placeMapInfoWindows.forEach((infoWindow) => infoWindow.close());
+  placeMapInfoWindows[index]?.open(placeMap, placeMapMarkers[index]);
+}
+
+async function renderPlaceMap(places) {
+  if (!placeMapPanel) return;
+  placeMapPanel.innerHTML = "";
+  placeMap = null;
+  placeMapPlaces = places;
+  embeddedMapMode = false;
+  clearPlaceMap();
+
+  if (!places.length) return;
+
+  try {
+    // 카카오맵 SDK 로딩 (타임아웃 5초)
+    const hasSdk = await Promise.race([
+      loadKakaoMapSdk(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("카카오맵 SDK 로딩 시간 초과")), 5000))
+    ]);
+    if (!hasSdk) {
+      placeMapPanel.innerHTML = '<div class="map-empty" style="padding:40px;text-align:center;color:var(--sub);">카카오맵 API 키가 설정되지 않았습니다.<br>.env 파일에 KAKAO_JAVASCRIPT_KEY를 설정해주세요.</div>';
+      return;
+    }
+
+    placeMapPanel.innerHTML = `
+      <div class="place-map-wrap">
+        <div id="placeMap" class="place-map" aria-label="추천 장소 지도"></div>
+        <div class="place-map-overlay-tabs" id="placeMapTabs"></div>
+      </div>
+    `;
+    const bounds = new window.kakao.maps.LatLngBounds();
+    placeMap = new window.kakao.maps.Map(document.querySelector("#placeMap"), {
+      center: new window.kakao.maps.LatLng(places[0].latitude, places[0].longitude),
+      level: 4,
+    });
+
+    const tabsEl = document.querySelector("#placeMapTabs");
+    if (tabsEl) {
+      tabsEl.innerHTML = places.map((place, index) => `
+        <button type="button" class="place-map-overlay-tab ${index === 0 ? "active" : ""}" data-map-tab-index="${index}">
+          <span class="place-map-tab-num">${index + 1}</span>
+          ${place.place_name}
+        </button>
+      `).join("");
+      tabsEl.querySelectorAll("[data-map-tab-index]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const idx = Number(btn.dataset.mapTabIndex);
+          tabsEl.querySelectorAll("[data-map-tab-index]").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          const card = placeRecommendationList?.querySelector(`[data-place-index="${idx}"]`);
+          placeRecommendationList?.querySelectorAll(".place-recommend-card").forEach((c) => c.classList.remove("selected"));
+          if (card) {
+            card.classList.add("selected");
+            card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          }
+          focusPlaceOnMap(places[idx], idx);
+        });
+      });
+    }
+
+    places.forEach((place, index) => {
+      const position = new window.kakao.maps.LatLng(place.latitude, place.longitude);
+      const markerImage = new window.kakao.maps.MarkerImage(
+        `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 36 44"><path d="M18 0C8.06 0 0 8.06 0 18c0 12.42 18 26 18 26S36 30.42 36 18C36 8.06 27.94 0 18 0z" fill="#6366f1"/><circle cx="18" cy="18" r="9" fill="white"/><text x="18" y="23" text-anchor="middle" font-size="13" font-weight="900" fill="#6366f1" font-family="-apple-system,sans-serif">${index + 1}</text></svg>`)}`,
+        new window.kakao.maps.Size(36, 44),
+        { offset: new window.kakao.maps.Point(18, 44) }
+      );
+      const marker = new window.kakao.maps.Marker({ position, image: markerImage });
+      const infoWindow = new window.kakao.maps.InfoWindow({
+        content: `<div class="map-infowindow"><strong>${place.place_name}</strong><span>${place.address}</span></div>`,
+        removable: false,
+      });
+      marker.setMap(placeMap);
+      window.kakao.maps.event.addListener(marker, "click", () => {
+        const tabsEl = document.querySelector("#placeMapTabs");
+        tabsEl?.querySelectorAll("[data-map-tab-index]").forEach((b) => b.classList.remove("active"));
+        tabsEl?.querySelector(`[data-map-tab-index="${index}"]`)?.classList.add("active");
+        const card = placeRecommendationList?.querySelector(`[data-place-index="${index}"]`);
+        placeRecommendationList?.querySelectorAll(".place-recommend-card").forEach((c) => c.classList.remove("selected"));
+        if (card) {
+          card.classList.add("selected");
+          card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+        focusPlaceOnMap(place, index);
+      });
+      placeMapMarkers.push(marker);
+      placeMapInfoWindows.push(infoWindow);
+      bounds.extend(position);
+    });
+
+    if (places.length > 1) {
+      placeMap.setBounds(bounds, 60, 60, 60, 60);
+    }
+    window.setTimeout(() => {
+      window.kakao.maps.event.trigger(placeMap, "resize");
+      focusPlaceOnMap(places[0], 0);
+    }, 100);
+  } catch (err) {
+    placeMapPanel.innerHTML = `<div class="map-empty" style="padding:40px;text-align:center;color:var(--sub);">카카오맵을 불러오지 못했습니다.<br>${err.message}</div>`;
+  }
+}
+
+function renderPlaceRecommendations(places) {
+  if (!placeRecommendationList) return;
+  placeRecommendationList.innerHTML = places.length
+    ? places
+        .map(
+          (place, index) => `
+            <article class="place-recommend-card" data-place-index="${index}" role="button" tabindex="0">
+              <div class="place-card-badge">${index + 1}</div>
+              <div class="place-card-body">
+                <strong class="place-card-name">${place.place_name}</strong>
+                <span class="place-card-address">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 5.25-7 13-7 13S5 14.25 5 9a7 7 0 0 1 7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
+                  ${place.address}
+                </span>
+                <p class="place-card-desc">${place.description}</p>
+                ${(place.features && place.features.length) ? `<div class="place-card-features">${place.features.map((f) => `<span class="place-feature-chip">${f}</span>`).join("")}</div>` : ""}
+              </div>
+              <div class="place-card-arrow">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+              </div>
+            </article>
+          `,
+        )
+        .join("")
+    : "";
+
+  placeRecommendationList.querySelectorAll("[data-place-index]").forEach((button) => {
+    const selectPlace = () => {
+      const place = places[Number(button.dataset.placeIndex)];
+      const index = Number(button.dataset.placeIndex);
+      if (!place || !meetingForm) return;
+      const locationInput = meetingForm.elements.location;
+      locationInput.value = `${place.place_name} (${place.address})`;
+      locationInput.dataset.latitude = String(place.latitude);
+      locationInput.dataset.longitude = String(place.longitude);
+      placeRecommendationList.querySelectorAll(".place-recommend-card").forEach((card) => {
+        card.classList.toggle("selected", card === button);
+      });
+      const tabsEl = document.querySelector("#placeMapTabs");
+      tabsEl?.querySelectorAll("[data-map-tab-index]").forEach((b) => b.classList.remove("active"));
+      tabsEl?.querySelector(`[data-map-tab-index="${index}"]`)?.classList.add("active");
+      focusPlaceOnMap(place, index);
+
+      // 지도 탭으로 자동 전환
+      const resultTabs = document.querySelectorAll(".place-result-tab[data-result-tab]");
+      resultTabs.forEach((t) => t.classList.remove("active"));
+      document.querySelector(".place-result-tab[data-result-tab='map']")?.classList.add("active");
+      const listPane = document.querySelector("#resultPaneList");
+      const mapPane = document.querySelector("#resultPaneMap");
+      if (listPane) listPane.hidden = true;
+      if (mapPane) mapPane.hidden = false;
+      if (placeMap) {
+        window.setTimeout(() => window.kakao?.maps?.event?.trigger(placeMap, "resize"), 50);
+      }
+    };
+    button.addEventListener("click", (event) => {
+      selectPlace();
+    });
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      selectPlace();
+    });
+  });
+}
+
+function showPlaceResultSection() {
+  const section = document.querySelector(".place-result-section");
+  if (section) section.hidden = false;
+}
+
+function hidePlaceResultSection() {
+  const section = document.querySelector(".place-result-section");
+  if (section) section.hidden = true;
+}
+
+async function loadPlaceRecommendations() {
+  if (!meetingForm || !placeRecommendationList || !recommendPlaceButton) return;
+  const formData = new FormData(meetingForm);
+  const status = document.querySelector("#meetingStatus");
+  const title = String(formData.get("title") || "").trim();
+  const description = String(formData.get("description") || "").trim();
+  const category = String(formData.get("category") || "").trim();
+  const keywords = splitInterests(formData.get("keywords") || "");
+
+  if (title.length < 2 || description.length < 5 || !category) {
+    status.textContent = "모임명, 소개, 카테고리를 먼저 입력해 주세요.";
+    return;
+  }
+
+  recommendPlaceButton.disabled = true;
+  recommendPlaceButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1s linear infinite"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> 추천 중`;
+  status.textContent = "";
+  placeRecommendationList.innerHTML = '<div class="empty-panel">장소를 찾는 중입니다.</div>';
+  if (placeMapPanel) placeMapPanel.innerHTML = '<div class="map-empty">지도 정보를 준비하는 중입니다.</div>';
+
+  try {
+    const places = await api("/api/place-recommendations", {
+      method: "POST",
+      body: JSON.stringify({
+        title,
+        category,
+        description,
+        keywords,
+        user_location: getUserRegion() || null,
+        user_interests: currentUser?.interests?.map(i => i.name) || [],
+        limit: 10,
+      }),
+    });
+    renderPlaceRecommendations(places);
+    await renderPlaceMap(places);
+    if (places.length) showPlaceResultSection();
+    if (!places.length) {
+      placeRecommendationList.innerHTML = '<div class="empty-panel">추천할 장소가 없습니다.</div>';
+    }
+  } catch (error) {
+    placeRecommendationList.innerHTML = "";
+    if (placeMapPanel) placeMapPanel.innerHTML = "";
+    hidePlaceResultSection();
+    status.textContent = error.message;
+  } finally {
+    recommendPlaceButton.disabled = false;
+    recommendPlaceButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 5.25-7 13-7 13S5 14.25 5 9a7 7 0 0 1 7-7z"/><circle cx="12" cy="9" r="2.5"/></svg> 장소 추천`;
+  }
 }
 
 function formatDate(value) {
@@ -186,16 +638,11 @@ function recommendRow(meeting) {
 
 function renderRecommendations(meetings) {
   if (!recommendSection || !recommendList) return;
-  if (!authToken()) {
-    recommendSection.hidden = true;
-    return;
-  }
-  cachedRecommendations = meetings || [];
+  cachedRecommendations = filterMeetingsByRegion(meetings || []);
   if (!cachedRecommendations.length) {
-    recommendSection.hidden = true;
+    recommendList.innerHTML = '<div class="empty-panel">설정한 지역에 맞는 추천 모임이 없습니다.</div>';
     return;
   }
-  recommendSection.hidden = false;
   recommendList.innerHTML = cachedRecommendations.map(recommendRow).join("");
   recommendList.querySelectorAll("[data-meeting-id]").forEach((row) => {
     row.addEventListener("click", () => {
@@ -203,6 +650,17 @@ function renderRecommendations(meetings) {
       if (meeting) renderMeetingDetail(meeting);
     });
   });
+}
+
+async function loadRecommendationView() {
+  if (!authToken()) {
+    recommendList.innerHTML = '<div class="empty-panel">로그인 후 추천을 받을 수 있어요.</div>';
+    return;
+  }
+  if (!cachedRecommendations.length) {
+    cachedRecommendations = (await loadRecommendations()) || [];
+  }
+  renderRecommendations(cachedRecommendations);
 }
 
 function bindMeetingCards() {
@@ -215,16 +673,18 @@ function bindMeetingCards() {
 }
 
 function renderMeetings(meetings) {
-  meetingCount.textContent = meetings.length;
-  meetingList.innerHTML = meetings.length
-    ? meetings.map((meeting, index) => meetingCard(meeting, index)).join("")
+  const filteredMeetings = filterMeetingsByRegion(meetings);
+  meetingCount.textContent = filteredMeetings.length;
+  meetingList.innerHTML = filteredMeetings.length
+    ? filteredMeetings.map((meeting, index) => meetingCard(meeting, index)).join("")
     : emptyCard("아직 등록된 모임이 없습니다.", "첫 모임을 만들어 피드에 보여주세요.");
   bindMeetingCards();
 }
 
 function renderMeetingPage(meetings) {
-  meetingPageList.innerHTML = meetings.length
-    ? meetings.map((meeting, index) => meetingCard(meeting, index, true)).join("")
+  const filteredMeetings = filterMeetingsByRegion(meetings);
+  meetingPageList.innerHTML = filteredMeetings.length
+    ? filteredMeetings.map((meeting, index) => meetingCard(meeting, index, true)).join("")
     : emptyCard("탐색할 모임이 없습니다.", "새 모임을 만들면 이곳에 카드로 표시됩니다.");
   bindMeetingCards();
 }
@@ -395,19 +855,38 @@ function renderMyMeetings(meetings) {
   bindMeetingCards();
 }
 
+function renderCalendarGrid() {
+  if (!calendarGrid || !calendarMonthLabel) return;
+
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
+
+  const monthLabel = `${currentYear}. ${String(currentMonth + 1).padStart(2, "0")}`;
+  calendarMonthLabel.textContent = monthLabel;
+
+  const firstDay = new Date(currentYear, currentMonth, 1);
+  const lastDay = new Date(currentYear, currentMonth + 1, 0);
+  const startOffset = firstDay.getDay();
+
+  const cells = [];
+  for (let i = 0; i < startOffset; i += 1) {
+    cells.push('<button type="button" aria-hidden="true"></button>');
+  }
+
+  for (let day = 1; day <= lastDay.getDate(); day += 1) {
+    const isToday = day === today.getDate();
+    cells.push(`<button type="button" class="${isToday ? "active-day" : ""}">${day}</button>`);
+  }
+
+  calendarGrid.innerHTML = ['<span>일</span>','<span>월</span>','<span>화</span>','<span>수</span>','<span>목</span>','<span>금</span>','<span>토</span>', ...cells].join('');
+}
+
 function renderMeetingDetail(meeting) {
   const initial = meeting.title.trim().slice(0, 1).toUpperCase();
   const ownerId = meeting.owner?.id;
   const isOwner = Boolean(currentUser && ownerId != null && ownerId === currentUser.id);
   const isFull = meeting.approved_members >= meeting.max_members;
-  const postSection = document.querySelector("#meetingPostSection");
-  const meetingPostForm = document.querySelector("#meetingPostForm");
-  if (meetingPostForm) {
-    meetingPostForm.dataset.meetingId = meeting.id;
-  }
-  if (postSection) {
-    postSection.style.display = isOwner ? "block" : "none";
-  }
   meetingDetail.innerHTML = `
     <div class="detail-hero">${initial}</div>
     <div>
@@ -422,9 +901,11 @@ function renderMeetingDetail(meeting) {
       <span>참여 ${meeting.approved_members}/${meeting.max_members}명</span>
     </div>
     ${isOwner ? `
-      <button class="primary-button" type="button" id="editMeetingButton" data-id="${meeting.id}">모임 수정</button>
-      <button class="primary-button" type="button" id="manageMembersButton" data-id="${meeting.id}">참여인원 관리</button>
-      <button class="primary-button" type="button" id="deleteMeetingButton" data-id="${meeting.id}" style="background:#f43f5e;">모임 삭제</button>
+      <div class="detail-actions">
+        <button class="detail-action-button" type="button" id="editMeetingButton" data-id="${meeting.id}">✏️ 모임 수정</button>
+        <button class="detail-action-button" type="button" id="manageMembersButton" data-id="${meeting.id}">👥 참여인원 관리</button>
+        <button class="detail-action-button detail-action-button-danger" type="button" id="deleteMeetingButton" data-id="${meeting.id}">🗑️ 모임 삭제</button>
+      </div>
     ` : `
       ${!isFull ? '<button class="primary-button" type="button" id="applyMeetingButton">참여 신청</button>' : '<button class="primary-button" type="button" disabled style="background:#94a3b8;">모집 마감</button>'}
     `}
@@ -474,16 +955,7 @@ function renderMeetingDetail(meeting) {
         )
         .join("")}</div></div>`;
     }
-
-    const currentMember = currentUser ? members.some((m) => m.user.id === currentUser.id) : false;
-    if (postSection) {
-      postSection.style.display = currentMember || isOwner ? "block" : "none";
-    }
-  }).catch(() => {
-    if (postSection) {
-      postSection.style.display = isOwner ? "block" : "none";
-    }
-  });
+  }).catch(() => {});
 
   document.querySelector("#applyMeetingButton")?.addEventListener("click", async () => {
     const status = document.querySelector("#applyStatus");
@@ -504,26 +976,6 @@ function renderMeetingDetail(meeting) {
   });
 
   loadMeetingSchedules(meeting.id).then(renderMeetingSchedules);
-
-  const postForm = document.querySelector("#meetingPostForm");
-  postForm.onsubmit = async (e) => {
-    e.preventDefault();
-    if (!authToken()) { setView("login"); return; }
-    const fd = new FormData(postForm);
-    const mid = Number(postForm.dataset.meetingId);
-    const postStatus = document.querySelector("#meetingPostStatus");
-    try {
-      await api("/api/posts", {
-        method: "POST",
-        body: JSON.stringify({ title: fd.get("title"), content: fd.get("content"), meeting_id: mid }),
-      });
-      postForm.reset();
-      postStatus.textContent = "";
-      await loadMeetingPosts(mid);
-    } catch (err) {
-      postStatus.textContent = err.message;
-    }
-  };
 
   const scheduleFormEl = document.querySelector("#meetingScheduleForm");
   if (scheduleFormEl) {
@@ -551,8 +1003,6 @@ function renderMeetingDetail(meeting) {
       }
     };
   }
-
-  document.querySelector("#refreshMeetingPosts").onclick = () => loadMeetingPosts(meeting.id);
 
   setView("detail");
 }
@@ -603,8 +1053,7 @@ async function loadRecommendations() {
 async function loadMeetings() {
   try {
     cachedMeetings = await api("/api/meetings");
-    const recommendations = await loadRecommendations();
-    renderRecommendations(recommendations || []);
+    cachedRecommendations = (await loadRecommendations()) || [];
     renderMeetings(cachedMeetings);
     renderMeetingPage(cachedMeetings);
     const myMeetings = await loadMyMeetings();
@@ -625,58 +1074,14 @@ async function loadMeetingPage() {
     return;
   }
   const keyword = meetingSearch?.value.trim().toLowerCase() || "";
-  const location = document.querySelector("#locationSearch")?.value.trim().toLowerCase() || "";
+  const searchLocation = document.querySelector("#locationSearch")?.value.trim().toLowerCase() || "";
+  const activeRegion = searchLocation || getUserRegion().toLowerCase();
   const filtered = cachedMeetings.filter((meeting) => {
     const matchKeyword = !keyword || [meeting.title, meeting.category, meeting.description, meeting.location].join(" ").toLowerCase().includes(keyword);
-    const matchLocation = !location || meeting.location.toLowerCase().includes(location);
+    const matchLocation = !activeRegion || meeting.location.toLowerCase().includes(activeRegion);
     return matchKeyword && matchLocation;
   });
   renderMeetingPage(filtered);
-}
-
-window.deletePost = async function(postId) {
-  if (!confirm("정말 이 게시글을 삭제하시겠습니까?")) return;
-  try {
-    await api(`/api/posts/${postId}`, { method: "DELETE" });
-    alert("게시글이 삭제되었습니다.");
-    await loadPosts();
-  } catch (error) {
-    alert(error.message);
-  }
-}
-
-async function loadMeetingPosts(meetingId) {
-  const list = document.querySelector("#meetingPostList");
-  try {
-    const posts = await api(`/api/meetings/${meetingId}/posts`);
-    list.innerHTML = posts.length
-      ? posts.map(post => `
-          <article class="post-item">
-            <span class="thumb"></span>
-            <div>
-              <small>${post.author?.name || ''} · ${formatDate(post.created_at)}</small>
-              <h3>${post.title}</h3>
-              <p>${post.content}</p>
-              ${currentUser && post.author.id === currentUser.id ? `
-                <div style="margin-top:8px;display:flex;gap:6px;">
-                  <button onclick="deletePost(${post.id}, ${meetingId})" style="background:#f43f5e;color:white;padding:4px 10px;border:none;border-radius:6px;cursor:pointer;font-size:12px;">삭제</button>
-                </div>` : ''}
-            </div>
-          </article>`).join("")
-      : '<div class="empty-panel">아직 게시글이 없습니다.</div>';
-  } catch (e) {
-    list.innerHTML = `<div class="empty-panel">${e.message}</div>`;
-  }
-}
-
-window.deletePost = async function(postId, meetingId) {
-  if (!confirm("정말 삭제하시겠습니까?")) return;
-  try {
-    await api(`/api/posts/${postId}`, { method: "DELETE" });
-    await loadMeetingPosts(meetingId);
-  } catch (e) {
-    alert(e.message);
-  }
 }
 
 function connectNotifySocket() {
@@ -782,12 +1187,116 @@ async function loadMyApplications() {
   }
 }
 
+// 도/시 데이터
+const KOREA_REGIONS = {
+  "서울": ["강남구", "강동구", "강북구", "강서구", "관악구", "광진구", "구로구", "금천구", "노원구", "도봉구", "동대문구", "동작구", "마포구", "서대문구", "서초구", "성동구", "성북구", "송파구", "양천구", "영등포구", "용산구", "은평구", "종로구", "중구", "중랑구"],
+  "부산": ["강서구", "금정구", "기장군", "남구", "동구", "동래구", "부산진구", "북구", "사상구", "사하구", "서구", "수영구", "연제구", "영도구", "중구", "해운대구"],
+  "대구": ["군위군", "남구", "달서구", "달성군", "동구", "북구", "서구", "수성구", "중구"],
+  "인천": ["강화군", "계양구", "남동구", "동구", "미추홀구", "부개구", "서구", "연수구", "옹진군", "중구"],
+  "광주": ["광산구", "남구", "동구", "북구", "서구"],
+  "대전": ["대덕구", "동구", "서구", "유성구", "중구"],
+  "울산": ["남구", "동구", "북구", "울주군", "중구"],
+  "세종": ["세종시"],
+  "경기": ["수원시", "성남시", "고양시", "용인시", "부천시", "안산시", "안양시", "남양주시", "화성시", "평택시", "의정부시", "시흥시", "파주시", "김포시", "광주시", "광명시", "군포시", "하남시", "오산시", "양주시", "이천시", "구리시", "안성시", "포천시", "의왕시", "양평군", "여주시", "동두천시", "과천시", "가평군", "연천군"],
+  "강원": ["춘천시", "원주시", "강릉시", "동해시", "태백시", "속초시", "삼척시", "홍천군", "횡성군", "영월군", "평창군", "정선군", "철원군", "화천군", "양구군", "인제군", "고성군", "양양군"],
+  "충북": ["청주시", "충주시", "제천시", "보은군", "옥천군", "영동군", "증평군", "진천군", "괴산군", "음성군", "단양군"],
+  "충남": ["천안시", "공주시", "보령시", "아산시", "서산시", "논산시", "계룡시", "당진시", "금산군", "부여군", "서천군", "청양군", "홍성군", "예산군", "태안군"],
+  "전북": ["전주시", "군산시", "익산시", "정읍시", "남원시", "김제시", "완주군", "진안군", "무주군", "장수군", "임실군", "순창군", "고창군", "부안군"],
+  "전남": ["목포시", "여수시", "순천시", "나주시", "광양시", "담양군", "곡성군", "구례군", "고흥군", "보성군", "화순군", "장흥군", "강진군", "해남군", "영암군", "무안군", "함평군", "영광군", "장성군", "완도군", "진도군", "신안군"],
+  "경북": ["포항시", "경주시", "김천시", "안동시", "구미시", "영주시", "영천시", "상주시", "문경시", "경산시", "의성군", "청송군", "영양군", "영덕군", "청도군", "고령군", "성주군", "칠곡군", "예천군", "봉화군", "울진군", "울릉군"],
+  "경남": ["창원시", "진주시", "통영시", "사천시", "김해시", "밀양시", "거제시", "양산시", "의령군", "함안군", "창녕군", "고성군", "남해군", "하동군", "산청군", "함양군", "거창군", "합천군"],
+  "제주": ["제주시", "서귀포시"]
+};
+
+// 도/시 캐스케이드 선택 초기화
+function initRegionSelect() {
+  const provinceSelect = document.querySelector("#provinceSelect");
+  const citySelect = document.querySelector("#citySelect");
+  const regionInput = document.querySelector("#regionInput");
+
+  if (!provinceSelect || !citySelect) return;
+
+  provinceSelect.addEventListener("change", () => {
+    const province = provinceSelect.value;
+    citySelect.innerHTML = '<option value="">시/군/구 선택</option>';
+    regionInput.value = province;
+
+    if (province && KOREA_REGIONS[province]) {
+      citySelect.disabled = false;
+      KOREA_REGIONS[province].forEach(city => {
+        const option = document.createElement("option");
+        option.value = city;
+        option.textContent = city;
+        citySelect.appendChild(option);
+      });
+    } else {
+      citySelect.disabled = true;
+    }
+  });
+
+  citySelect.addEventListener("change", () => {
+    const province = provinceSelect.value;
+    const city = citySelect.value;
+    if (province && city) {
+      regionInput.value = `${province} ${city}`;
+    } else if (province) {
+      regionInput.value = province;
+    }
+  });
+}
+
+// 저장된 지역값으로 도/시 선택 복원
+function setRegionSelectValue(savedRegion) {
+  const provinceSelect = document.querySelector("#provinceSelect");
+  const citySelect = document.querySelector("#citySelect");
+  const regionInput = document.querySelector("#regionInput");
+
+  if (!provinceSelect || !savedRegion) return;
+
+  // 저장된 값에서 도와 시 추출 (예: "서울 강남구" 또는 "경기 수원시")
+  const parts = savedRegion.split(" ");
+  const province = parts[0];
+  const city = parts.slice(1).join(" ");
+
+  // 도 선택
+  provinceSelect.value = province;
+  regionInput.value = savedRegion;
+
+  if (province && KOREA_REGIONS[province]) {
+    // 시/군/구 옵션 생성
+    citySelect.innerHTML = '<option value="">시/군/구 선택</option>';
+    citySelect.disabled = false;
+    KOREA_REGIONS[province].forEach(cityName => {
+      const option = document.createElement("option");
+      option.value = cityName;
+      option.textContent = cityName;
+      citySelect.appendChild(option);
+    });
+    // 시 선택 (있으면)
+    if (city) {
+      citySelect.value = city;
+    }
+  }
+}
+
 async function loadEditProfile() {
   if (!currentUser) return;
   const form = document.querySelector("#editProfileForm");
   form.name.value = currentUser.name || '';
   form.bio.value = currentUser.bio || '';
-  form.interests.value = currentUser.interests?.map(i => i.name).join(', ') || '';
+  // 관심 분야 3개 드롭다운 설정
+  const interest1Select = document.querySelector("#interest1Select");
+  const interest2Select = document.querySelector("#interest2Select");
+  const interest3Select = document.querySelector("#interest3Select");
+  if (currentUser.interests && currentUser.interests.length > 0) {
+    const userInterests = currentUser.interests.map(i => i.name);
+    if (interest1Select) interest1Select.value = userInterests[0] || "";
+    if (interest2Select) interest2Select.value = userInterests[1] || "";
+    if (interest3Select) interest3Select.value = userInterests[2] || "";
+  }
+  // 도/시 캐스케이드 선택 초기화 및 값 설정
+  initRegionSelect();
+  setRegionSelectValue(getUserRegion());
 }
 
 document.querySelector("#editProfileForm")?.addEventListener("submit", async (e) => {
@@ -795,15 +1304,28 @@ document.querySelector("#editProfileForm")?.addEventListener("submit", async (e)
   const fd = new FormData(e.currentTarget);
   const statusEl = document.querySelector("#editProfileStatus");
   try {
+    const region = setUserRegion(fd.get("region") || "");
+    // 3개 드롭다운에서 선택된 값들 가져오기 (중복 제거, 빈값 제거)
+    const selectedInterests = [fd.get("interest1"), fd.get("interest2"), fd.get("interest3")]
+      .filter((v, i, arr) => v && arr.indexOf(v) === i) // 빈값 제거 + 중복 제거
+      .map(name => ({ name }));
     currentUser = await api("/api/users/me", {
       method: "PATCH",
       body: JSON.stringify({
         name: fd.get("name"),
         bio: fd.get("bio"),
-        interests: splitInterests(fd.get("interests") || ""),
+        interests: selectedInterests,
       }),
     });
     updateProfile();
+    const locationSearch = document.querySelector("#locationSearch");
+    if (locationSearch) {
+      locationSearch.value = region;
+    }
+    await loadMeetings();
+    if (document.querySelector("#meetings")?.classList.contains("active")) {
+      await loadMeetingPage();
+    }
     statusEl.textContent = "저장되었습니다.";
   } catch (err) {
     statusEl.textContent = err.message;
@@ -1009,6 +1531,13 @@ document.querySelector("#refreshApplications")?.addEventListener("click", loadAp
 meetingSearch?.addEventListener("input", loadMeetingPage);
 document.querySelector("#locationSearch")?.addEventListener("input", loadMeetingPage);
 
+calendarPrev?.addEventListener("click", () => {
+  // 현재는 날짜 기준 고정 캘린더이므로 변화 없음
+});
+calendarNext?.addEventListener("click", () => {
+  // 현재는 날짜 기준 고정 캘린더이므로 변화 없음
+});
+
 navButtons.forEach((button) => {
   if (button.dataset.view === "home") {
     button.addEventListener("click", () => {
@@ -1019,9 +1548,14 @@ navButtons.forEach((button) => {
 
 document.querySelector("#signupForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const form = new FormData(event.currentTarget);
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
   const status = document.querySelector("#authStatus");
   try {
+    // 3개 드롭다운에서 선택된 값들 가져오기 (중복 제거, 빈값 제거)
+    const selectedInterests = [form.get("interest1"), form.get("interest2"), form.get("interest3")]
+      .filter((v, i, arr) => v && arr.indexOf(v) === i) // 빈값 제거 + 중복 제거
+      .map(name => ({ name }));
     await api("/api/auth/signup", {
       method: "POST",
       body: JSON.stringify({
@@ -1029,7 +1563,7 @@ document.querySelector("#signupForm").addEventListener("submit", async (event) =
         email: form.get("email"),
         password: form.get("password"),
         bio: form.get("bio"),
-        interests: splitInterests(form.get("interests") || ""),
+        interests: selectedInterests,
       }),
     });
     const data = await api("/api/auth/login", {
@@ -1043,7 +1577,7 @@ document.querySelector("#signupForm").addEventListener("submit", async (event) =
     currentUser = await api("/api/users/me");
     updateProfile();
     status.textContent = "회원가입과 로그인이 완료되었습니다.";
-    event.currentTarget.reset();
+    formElement.reset();
     await loadMeetings();
     await loadApplications();
     setView("home");
@@ -1066,15 +1600,100 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
     });
     localStorage.setItem(tokenKey, data.access_token);
     currentUser = await api("/api/users/me");
-    status.textContent = "로그인되었습니다.";
-    updateProfile();
-    await loadMeetings();
-    await loadApplications();
-    connectNotifySocket();
-    setView("home");
+    status.textContent = "로그인되었습니다. 홈 화면으로 이동합니다...";
+    // 홈 화면으로 새로고침
+    window.location.href = "/";
   } catch (error) {
     status.textContent = error.message;
   }
+});
+
+recommendPlaceButton?.addEventListener("click", loadPlaceRecommendations);
+
+document.querySelectorAll(".place-result-tab[data-result-tab]").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".place-result-tab[data-result-tab]").forEach((t) => t.classList.remove("active"));
+    tab.classList.add("active");
+    const target = tab.dataset.resultTab;
+    const listPane = document.querySelector("#resultPaneList");
+    const mapPane = document.querySelector("#resultPaneMap");
+    if (target === "list") {
+      if (listPane) listPane.hidden = false;
+      if (mapPane) mapPane.hidden = true;
+    } else {
+      if (listPane) listPane.hidden = true;
+      if (mapPane) mapPane.hidden = false;
+      if (placeMap) {
+        window.setTimeout(() => window.kakao?.maps?.event?.trigger(placeMap, "resize"), 50);
+      }
+    }
+  });
+});
+
+// 모임 폼 지역 선택 초기화
+function initMeetingRegionSelect() {
+  const provinceSelect = document.querySelector("#meetingProvinceSelect");
+  const citySelect = document.querySelector("#meetingCitySelect");
+  const regionInput = document.querySelector("#meetingRegionInput");
+  
+  if (!provinceSelect || !citySelect) return;
+  
+  // 사용자 저장된 지역으로 기본값 설정
+  const savedRegion = getUserRegion();
+  if (savedRegion) {
+    const parts = savedRegion.split(" ");
+    if (parts.length >= 2) {
+      provinceSelect.value = parts[0];
+      // 시/군/구 옵션 생성
+      citySelect.innerHTML = '<option value="">시/군/구 선택</option>';
+      citySelect.disabled = false;
+      if (KOREA_REGIONS[parts[0]]) {
+        KOREA_REGIONS[parts[0]].forEach(city => {
+          const option = document.createElement("option");
+          option.value = city;
+          option.textContent = city;
+          citySelect.appendChild(option);
+        });
+        citySelect.value = parts.slice(1).join(" ");
+      }
+      regionInput.value = savedRegion;
+    }
+  }
+  
+  provinceSelect.addEventListener("change", () => {
+    const province = provinceSelect.value;
+    citySelect.innerHTML = '<option value="">시/군/구 선택</option>';
+    regionInput.value = province;
+    
+    if (province && KOREA_REGIONS[province]) {
+      citySelect.disabled = false;
+      KOREA_REGIONS[province].forEach(city => {
+        const option = document.createElement("option");
+        option.value = city;
+        option.textContent = city;
+        citySelect.appendChild(option);
+      });
+    } else {
+      citySelect.disabled = true;
+    }
+  });
+  
+  citySelect.addEventListener("change", () => {
+    const province = provinceSelect.value;
+    const city = citySelect.value;
+    if (province && city) {
+      regionInput.value = `${province} ${city}`;
+    } else if (province) {
+      regionInput.value = province;
+    }
+  });
+}
+
+// 모임 생성 뷰 열 때 지역 선택 초기화
+document.querySelectorAll('[data-view="create"]').forEach(btn => {
+  btn.addEventListener("click", () => {
+    initMeetingRegionSelect();
+  });
 });
 
 document.querySelector("#meetingForm").addEventListener("submit", async (event) => {
@@ -1092,6 +1711,14 @@ document.querySelector("#meetingForm").addEventListener("submit", async (event) 
     status.textContent = "카테고리를 선택해주세요.";
     return;
   }
+  
+  // 지역 확인
+  const region = formData.get("region");
+  if (!region) {
+    status.textContent = "지역을 선택해주세요.";
+    return;
+  }
+  
   try {
     await api("/api/meetings", {
       method: "POST",
@@ -1099,9 +1726,9 @@ document.querySelector("#meetingForm").addEventListener("submit", async (event) 
         title: formData.get("title"),
         description: formData.get("description"),
         category: category,
-        location: formData.get("location"),
+        location: `${region} ${formData.get("location")}`,
         max_members: Number(formData.get("max_members")),
-        start_at: new Date(formData.get("start_at")).toISOString(),
+        start_at: new Date().toISOString(), // 현재 시간으로 설정
       }),
     });
     status.textContent = "모임이 등록되었습니다.";
@@ -1129,6 +1756,8 @@ document.querySelector("#chatForm").addEventListener("submit", (event) => {
 function updateProfile() {
   document.querySelector("#profileName").textContent = currentUser?.name || "게스트";
   document.querySelector("#profileEmail").textContent = currentUser?.email || "로그인 후 추천을 받을 수 있어요.";
+  const region = getUserRegion();
+  document.querySelector("#profileRegion").textContent = region ? `내 지역: ${region}` : "지역 설정을 추가해 주세요.";
 }
 
 async function restoreSession() {
@@ -1150,5 +1779,6 @@ async function restoreSession() {
 }
 
 restoreSession();
+renderCalendarGrid();
 
 document.querySelector("#backButton").style.visibility = "hidden";
